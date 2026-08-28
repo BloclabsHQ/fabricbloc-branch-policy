@@ -1,0 +1,68 @@
+# Cost class: event
+#
+# Canonical executable projection of FabricBloc GOV-0022. This workflow is
+# public so both BloclabsHQ rulesets and cross-organization FabricBloc callers
+# can consume one implementation.
+name: branch-name-guard
+
+on:
+  workflow_call:
+    inputs:
+      base-branches:
+        description: Comma-separated branch names exempt from the check
+        type: string
+        default: main,dev,master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ${{ vars.FLEET_ENABLED == 'true' && fromJSON('["self-hosted","linux","x64"]') || 'ubuntu-latest' }}
+    timeout-minutes: 2
+    steps:
+      - name: Validate branch name
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          BASE_BRANCHES: ${{ inputs.base-branches || 'main,dev,master' }}
+        run: |
+          set -euo pipefail
+
+          IFS=',' read -ra EXEMPT <<< "$BASE_BRANCHES"
+          for b in "${EXEMPT[@]}"; do
+            if [ "$BRANCH" = "$b" ]; then
+              echo "branch-name-guard: '$BRANCH' is a base branch, exempt."
+              exit 0
+            fi
+          done
+
+          # agent/<session|autonomous>/<type>/<scope>-<slug> — agent-touched work.
+          # The final segment requires both a scope and a slug.
+          AGENT_RE='^agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+$'
+          # <github-handle>/<type>/<slug> — direct human work. The actor segment
+          # follows GitHub's handle length and leading/trailing character shape.
+          HUMAN_RE='^[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$'
+          PROVIDER_RE='^(codex|claude|qwen)/'
+
+          # "agent/" is reserved and must fully match the agent grammar.
+          if [[ "$BRANCH" == agent/* ]]; then
+            if [[ "$BRANCH" =~ $AGENT_RE ]]; then
+              echo "branch-name-guard: '$BRANCH' matches convention."
+              exit 0
+            fi
+          elif [[ ! "$BRANCH" =~ $PROVIDER_RE && "$BRANCH" =~ $HUMAN_RE ]]; then
+            echo "branch-name-guard: '$BRANCH' matches convention."
+            exit 0
+          fi
+
+          echo "::error::Branch '$BRANCH' does not match the FabricBloc naming convention."
+          echo ""
+          echo "Expected one of:"
+          echo "  agent/session/<type>/<scope>-<slug>       (human-directed agent work)"
+          echo "  agent/autonomous/<type>/<scope>-<slug>    (autonomous agent work)"
+          echo "  <github-handle>/<type>/<slug>             (direct human work)"
+          echo "  type = feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style"
+          echo ""
+          echo "See: https://github.com/BloclabsHQ/fabricbloc/blob/main/decisions/GOV-0022-branch-naming-and-provider-agnostic-enforcement.md"
+          exit 1
