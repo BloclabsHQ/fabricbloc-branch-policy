@@ -26,7 +26,9 @@ permissions:
 
 jobs:
   guard:
-    runs-on: ${{ inputs.runner != '' && fromJSON(inputs.runner) || (vars.FLEET_ENABLED == 'true' && fromJSON('["self-hosted","linux","x64"]') || 'ubuntu-latest') }}
+    # This repo is public and the org fleet refuses public repos, so its own
+    # PRs use a free hosted runner. Callers are private and use the fleet.
+    runs-on: ${{ inputs.runner != '' && fromJSON(inputs.runner) || (github.repository == 'BloclabsHQ/fabricbloc-branch-policy' && 'ubuntu-latest' || (vars.FLEET_ENABLED == 'true' && fromJSON('["self-hosted","linux","x64"]') || 'ubuntu-latest')) }}
     timeout-minutes: 2
     steps:
       - name: Validate branch name
