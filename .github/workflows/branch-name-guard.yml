@@ -12,6 +12,13 @@ on:
         description: Comma-separated branch names exempt from the check
         type: string
         default: main,dev,master
+      runner:
+        description: >-
+          JSON runner labels, e.g. '["self-hosted","linux","x64"]'. A caller in
+          another organization must pass this: its vars do not reach this
+          workflow, so the FLEET_ENABLED fallback would pick a billed hosted runner.
+        type: string
+        default: ''
   pull_request:
 
 permissions:
@@ -19,7 +26,7 @@ permissions:
 
 jobs:
   guard:
-    runs-on: ${{ vars.FLEET_ENABLED == 'true' && fromJSON('["self-hosted","linux","x64"]') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && fromJSON(inputs.runner) || (vars.FLEET_ENABLED == 'true' && fromJSON('["self-hosted","linux","x64"]') || 'ubuntu-latest') }}
     timeout-minutes: 2
     steps:
       - name: Validate branch name
