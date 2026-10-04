@@ -5,6 +5,7 @@ Usage: python3 agent-gates/validate_canon.py [path/to/api.github.com.json]
 Without an argument it downloads the description from
 https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json
 Needs: pip install jsonschema. TODO-PIN placeholders are replaced by a dummy SHA.
+(Policy-repo CI runs this on every pull_request.)
 """
 import json, sys, urllib.request
 from pathlib import Path
