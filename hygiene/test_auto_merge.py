@@ -26,12 +26,15 @@ class TestAutoMerge(unittest.TestCase):
             "head": {"ref": "agent/autonomous/fix/x"},
             "user": {"login": "fabricbloc-agent-ops[bot]"},
         }
-        self.assertEqual(mod.pr_blocked(pr, []), "engine-branch")
+        self.assertEqual(mod.skip_reason(pr, [], []), "engine-branch")
 
-    def test_never_allowlist_c35(self):
+    def test_dependabot_major_blocked(self):
         mod = load("auto_merge")
-        os.environ.update(REPO="BloclabsHQ/fabricbloc-branch-policy")
-        # main() early exit tested via import side effects avoided
+        pr = {"user": {"login": "dependabot[bot]"}}
+        self.assertFalse(mod.dependabot_allowed(pr, True, "version-update:semver-major"))
+        self.assertTrue(mod.dependabot_allowed(pr, True, "version-update:semver-minor"))
+
+    def test_never_allowlist(self):
         common = load("common")
         self.assertIn("BloclabsHQ/fabricbloc-branch-policy", common.FLOOR_NEVER_ALLOWLIST)
 
