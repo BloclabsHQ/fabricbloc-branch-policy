@@ -8,9 +8,8 @@ launch:
     strategy: find_by_pr_then_reply
     never_relaunch_if_agent_exists: true
   branch_name:
-    # GOV-0022 agent grammar (branch-name-guard AGENT_RE) plus Warden policy PR exception.
-    session_branch_regex: '^(agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+|agent/session/warden-[a-z0-9]+(-[a-z0-9]+)*)$'
-    warden_branch_example: agent/session/warden-<slug>
+    # GOV-0022 agent grammar (same as branch-name-guard AGENT_RE).
+    session_branch_regex: '^agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+$'
   registry:
     recheck_and_claim_before_launch: true
     dedupe_after_launch: true

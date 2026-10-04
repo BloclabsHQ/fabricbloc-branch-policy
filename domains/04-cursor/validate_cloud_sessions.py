@@ -33,10 +33,7 @@ def semantic_checks(data: dict) -> list[str]:
             re.compile(regex)
         except re.error as e:
             errs.append(f"session_branch_regex invalid: {e}")
-        sample = "agent/session/warden-cloud-sessions-p1-3720"
-        if not re.match(regex, sample):
-            errs.append(f"session_branch_regex rejects warden example branch {sample!r}")
-        if not re.match(regex, "agent/session/ci/cursor-env-policy"):
+        if not re.match(regex, "agent/session/chore/warden-cloud-sessions-p1"):
             errs.append("session_branch_regex rejects known good agent/session branch")
     waits = data.get("waits") or {}
     if int(waits.get("max_in_agent_wait_seconds") or 0) > 120:
