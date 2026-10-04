@@ -18,7 +18,7 @@
   "pins": {
     "agent_gates_sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25",
     "branch_name_guard_sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25",
-    "hygiene_sha": "d03bf9dc8bb23c71ea85750543c566db4970cd78",
+    "hygiene_sha": "6582dcbf7b163c55be837003e7f39a141645cb50",
     "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit."
   },
   "organization_rulesets": [
