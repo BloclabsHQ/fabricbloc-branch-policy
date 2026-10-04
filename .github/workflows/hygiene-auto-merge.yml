@@ -1,0 +1,544 @@
+# Cost class: event (caller-defined)
+name: hygiene-auto-merge
+
+on:
+  workflow_call:
+    inputs:
+      extra_protected_paths:
+        type: string
+        default: ""
+      allow_dependabot:
+        type: boolean
+        default: true
+      required_gate_path:
+        type: string
+        default: .github/workflows/agent-review-of-record.yml
+      agent_gates_sha:
+        description: pins.agent_gates_sha from canon.json
+        type: string
+        required: true
+      default_branch:
+        type: string
+        default: main
+    secrets:
+      HYGIENE_APP_PRIVATE_KEY:
+        required: true
+
+permissions: {}
+
+jobs:
+  evaluate:
+    if: >-
+      vars.HYGIENE_ENABLED != 'false' &&
+      vars.HYGIENE_C3_MODE != 'off'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    steps:
+      - name: Resolve PR context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          WR_ID: ${{ github.event.workflow_run.id }}
+          WR_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_FROM_EVENT: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          pr="${PR_FROM_EVENT:-}"
+          reconcile=false
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            reconcile=true
+          fi
+          if [ -z "$pr" ] && [ -n "${WR_ID:-}" ]; then
+            pr="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+              "${API}/repos/${REPO}/actions/runs/${WR_ID}" | python3 -c "import json,sys; d=json.load(sys.stdin); ps=d.get('pull_requests') or []; print(ps[0]['number'] if ps else '')")"
+          fi
+          if [ -z "$pr" ] && [ -n "${WR_PR:-}" ]; then
+            pr="${WR_PR}"
+          fi
+          echo "pr_number=${pr}" >> "$GITHUB_OUTPUT"
+          echo "reconcile=${reconcile}" >> "$GITHUB_OUTPUT"
+      - name: Dependabot metadata
+        id: dependabot
+        if: >-
+          inputs.allow_dependabot &&
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.user.login == 'dependabot[bot]'
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
+        with:
+          github-token: ${{ github.token }}
+      - name: Mint hygiene App token (T1)
+        id: app
+        if: vars.HYGIENE_C3_MODE == 'live' && vars.HYGIENE_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.HYGIENE_APP_ID }}
+          private-key: ${{ secrets.HYGIENE_APP_PRIVATE_KEY }}
+      - name: Auto-merge evaluate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HYGIENE_APP_TOKEN: ${{ steps.app.outputs.token }}
+          API: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          RECONCILE: ${{ steps.ctx.outputs.reconcile }}
+          EVENT_ACTION: ${{ github.event.action }}
+          REQUIRED_GATE_PATH: ${{ inputs.required_gate_path }}
+          AGENT_GATES_SHA: ${{ inputs.agent_gates_sha }}
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          HYGIENE_MODE: ${{ vars.HYGIENE_C3_MODE }}
+          ALLOW_DEPENDABOT: ${{ inputs.allow_dependabot }}
+          DEPENDABOT_UPDATE_TYPE: ${{ steps.dependabot.outputs.update-type }}
+          EXTRA_PROTECTED_PATHS: ${{ inputs.extra_protected_paths }}
+        run: |
+          python3 - <<'PY'
+          """Shared constants and GitHub API helpers for repo-hygiene scripts (stdlib only)."""
+          import fnmatch
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
+          DEFAULT_BASE_REF = "main"
+          MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
+
+          FLOOR_DENIED = [
+              "agents/runtime/engine/",
+              "agents/agents.yaml",
+              ".github/workflows/",
+              ".github/actions/",
+              "decisions/",
+              "architecture/decisions/",
+              "CODEOWNERS",
+              ".github/CODEOWNERS",
+              "docs/CODEOWNERS",
+          ]
+
+          HYGIENE_EXTRA_PROTECTED = [
+              "infra/",
+              "ops/",
+              "iac/",
+              "**/iam/**",
+              "**/*.tf",
+              "architecture/SECRETS.md",
+              "architecture/ENV_FILES.md",
+              "policy/",
+              "rulesets/",
+          ]
+
+          FLOOR_NEVER_ALLOWLIST = frozenset({
+              "BloclabsHQ/fabric-iac",
+              "BloclabsHQ/fabric-tss",
+              "BloclabsHQ/fabric-contracts",
+              "BloclabsHQ/fabric-auth",
+              "BloclabsHQ/fabric-wallet",
+              "BloclabsHQ/go-foundation",
+              "BloclabsHQ/fabric-platform",
+              "BloclabsHQ/github-actions",
+              "BloclabsHQ/fabricbloc-branch-policy",
+              "BloclabsHQ/context",
+          })
+
+          HOLD_LABELS = frozenset({"HOLD", "DO NOT MERGE"})
+          SPEC_LABELS = frozenset({"spec:draft", "spec:gate", "spec:ready", "blocked", "security"})
+
+          TARGET_REPOS = {"BloclabsHQ/fabricbloc"}
+
+          MAX_PAGES = 100
+
+          API = os.environ.get("API", "https://api.github.com").rstrip("/")
+          TOKEN = os.environ.get("GH_TOKEN", "")
+
+
+          def fail(mode, msg):
+              print(f"::error::{mode}: {msg}")
+              sys.exit(1)
+
+
+          def call(path, *, token=None, accept="application/vnd.github+json", allow_404=False, method="GET", body=None):
+              tok = token if token is not None else TOKEN
+              data = None
+              headers = {
+                  "Authorization": f"Bearer {tok}",
+                  "Accept": accept,
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "fabricbloc-hygiene",
+              }
+              if body is not None:
+                  data = json.dumps(body).encode()
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(API + path, data=data, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as resp:
+                      raw = resp.read().decode()
+              except urllib.error.HTTPError as exc:
+                  if allow_404 and exc.code == 404:
+                      return None
+                  raise HygieneAPIError(exc.code, path.split("?")[0])
+              except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                  raise HygieneAPIError(0, f"{type(exc).__name__}") from exc
+              if accept.endswith(".raw") or accept.endswith("+raw"):
+                  return raw
+              return json.loads(raw or "null")
+
+
+          class HygieneAPIError(Exception):
+              def __init__(self, code, path):
+                  self.code = code
+                  self.path = path
+                  super().__init__(f"GitHub API {code} on {path}")
+
+
+          def paginate(path, *, cap=MAX_PAGES, token=None):
+              out, page = [], 1
+              while page <= cap:
+                  sep = "&" if "?" in path else "?"
+                  chunk = call(f"{path}{sep}page={page}&per_page=100", token=token)
+                  if not chunk:
+                      break
+                  if not isinstance(chunk, list):
+                      break
+                  out.extend(chunk)
+                  if len(chunk) < 100:
+                      break
+                  page += 1
+              if page > cap:
+                  raise HygieneAPIError(0, f"pagination cap {cap} on {path.split('?')[0]}")
+              return out
+
+
+          def repo_short(full_name):
+              return full_name.split("/", 1)[-1]
+
+
+          def path_matches_any(path, patterns):
+              path = path or ""
+              for pat in patterns:
+                  if fnmatch.fnmatch(path, pat) or path.startswith(pat.rstrip("*")):
+                      return True
+                  if pat.endswith("/") and path.startswith(pat):
+                      return True
+              return False
+
+
+          def fetch_manifest_denied(repo, ref, *, mode="hygiene-manifest"):
+              """Load denied paths from base manifest. Any failure fails closed (never skip)."""
+              qpath = urllib.parse.quote(MANIFEST, safe="")
+              qref = urllib.parse.quote(ref, safe="")
+              path = f"/repos/{repo}/contents/{qpath}?ref={qref}"
+              try:
+                  raw = call(path, accept="application/vnd.github.raw")
+              except HygieneAPIError as exc:
+                  fail(mode, f"manifest unreadable at {ref}: {exc}")
+              if not isinstance(raw, str) or not raw.strip():
+                  fail(mode, f"manifest missing or empty at {ref}")
+              try:
+                  data = json.loads(raw)
+              except json.JSONDecodeError:
+                  fail(mode, f"manifest invalid JSON at {ref}")
+              if not isinstance(data, dict):
+                  fail(mode, f"manifest must be a JSON object at {ref}")
+              dp = data.get("denied_paths") or {}
+              if not isinstance(dp, dict):
+                  fail(mode, "manifest denied_paths must be an object")
+              denied = list(FLOOR_DENIED)
+              denied += list(dp.get("arch_0048_baseline") or [])
+              denied += list(dp.get("proposed_additions") or [])
+              denied += list(HYGIENE_EXTRA_PROTECTED)
+              never = set(FLOOR_NEVER_ALLOWLIST)
+              for name in data.get("never_allowlist") or []:
+                  if isinstance(name, str):
+                      never.add(name if "/" in name else f"BloclabsHQ/{name}")
+              return denied, never
+
+
+          def dry_run(mode_env=None):
+              mode = (mode_env or os.environ.get("HYGIENE_MODE") or "dry-run").strip().lower()
+              return mode == "dry-run"
+
+
+          def hygiene_enabled(c_var, org_var=None):
+              org = (org_var or os.environ.get("HYGIENE_ENABLED") or "").strip().lower()
+              if org == "false":
+                  return False
+              mode = (c_var or os.environ.get("HYGIENE_MODE") or "").strip().lower()
+              return mode != "off"
+
+
+          MARKER_BOT_RE = re.compile(r"<!--\s*hygiene:([\w-]+):([^>]+)\s*-->")
+
+
+          def slack_post_message(token, channel, text, thread_ts=None):
+              payload = {"channel": channel, "text": text, "unfurl_links": False, "unfurl_media": False}
+              if thread_ts:
+                  payload["thread_ts"] = thread_ts
+              data = json.dumps(payload).encode()
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=data,
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  body = json.loads(resp.read().decode())
+              if not body.get("ok"):
+                  raise RuntimeError(body.get("error") or "slack error")
+              return body.get("ts")
+
+          #!/usr/bin/env python3
+          """C3 auto-merge (evaluate + enable/disable via hygiene App token). Gated on canon-agent-gates."""
+          import json
+          import os
+
+              FLOOR_NEVER_ALLOWLIST,
+              HOLD_LABELS,
+              TARGET_REPOS,
+              call,
+              dry_run,
+              fail,
+              fetch_manifest_denied,
+              paginate,
+              path_matches_any,
+          )
+
+          MODE = "hygiene-c3-auto-merge"
+          ENGINE_AUTHOR = "fabricbloc-agent-ops[bot]"
+          ENGINE_MARKER = "<!-- hygiene:c3:engine-owned -->"
+
+
+          def env(name, default=""):
+              return os.environ.get(name, default)
+
+
+          def gate_enforced(token, repo, base, gate_path, pin_sha):
+              rules = call(f"/repos/{repo}/rules/branches/{base}", token=token) or []
+              for rule in rules:
+                  if rule.get("type") != "workflows":
+                      continue
+                  for wf in (rule.get("parameters") or {}).get("workflows") or []:
+                      if wf.get("path") == gate_path and wf.get("sha") == pin_sha:
+                          return True
+              return False
+
+
+          def skip_reason(pr, denied, extra_paths):
+              if pr.get("draft"):
+                  return "draft"
+              labels = {l.get("name") for l in pr.get("labels") or []}
+              if labels & HOLD_LABELS:
+                  return "hold"
+              if "security" in labels:
+                  return "security"
+              head = (pr.get("head") or {}).get("ref") or ""
+              if head.startswith("agent/autonomous/"):
+                  return "engine-branch"
+              user = (pr.get("user") or {}).get("login")
+              if user == ENGINE_AUTHOR:
+                  return "engine-author"
+              return None
+
+
+          def dependabot_allowed(pr, allow_flag, update_type):
+              user = (pr.get("user") or {}).get("login")
+              if user != "dependabot[bot]":
+                  return True
+              if not allow_flag:
+                  return False
+              if update_type in ("version-update:semver-patch", "version-update:semver-minor"):
+                  return True
+              return False
+
+
+          def graphql(token, query, variables):
+              return call(
+                  "/graphql",
+                  token=token,
+                  method="POST",
+                  body={"query": query, "variables": variables},
+              )
+
+
+          def auto_merge_enabled(token, node_id):
+              q = """
+              query($id: ID!) {
+                node(id: $id) {
+                  ... on PullRequest {
+                    autoMergeRequest { enabledAt mergeMethod }
+                    headRefOid
+                  }
+                }
+              }
+              """
+              data = graphql(token, q, {"id": node_id})
+              node = (data or {}).get("data", {}).get("node") or {}
+              return node.get("autoMergeRequest"), node.get("headRefOid")
+
+
+          def disable_auto_merge(token, node_id):
+              if dry_run():
+                  print(f"DRY-RUN disable auto-merge {node_id}")
+                  return
+              q = """
+              mutation($id: ID!) {
+                disablePullRequestAutoMerge(input: {pullRequestId: $id}) {
+                  clientMutationId
+                }
+              }
+              """
+              graphql(token, q, {"id": node_id})
+
+
+          def enable_auto_merge(token, node_id, head_oid):
+              print(f"enable expectedHeadOid={head_oid}")
+              if dry_run():
+                  return True
+              q = """
+              mutation($id: ID!, $sha: GitObjectID!) {
+                enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH, expectedHeadOid: $sha}) {
+                  clientMutationId
+                }
+              }
+              """
+              try:
+                  graphql(token, q, {"id": node_id, "sha": head_oid})
+                  return True
+              except Exception as exc:
+                  print(f"enable failed: {exc}")
+                  return False
+
+
+          def direct_squash_merge(token, repo, pr_number, head_sha):
+              print(f"fallback PUT merge sha={head_sha}")
+              if dry_run():
+                  return
+              call(
+                  f"/repos/{repo}/pulls/{pr_number}/merge",
+                  token=token,
+                  method="PUT",
+                  body={"merge_method": "squash", "sha": head_sha},
+              )
+
+
+          def comment(token, repo, pr_number, body):
+              if dry_run():
+                  print(f"DRY-RUN comment: {body[:80]}")
+                  return
+              call(f"/repos/{repo}/issues/{pr_number}/comments", token=token, method="POST", body={"body": body})
+
+
+          def handle_engine_owned(token, app_token, repo, pr_number, pr):
+              node = pr.get("node_id")
+              am, _ = auto_merge_enabled(token, node)
+              if am:
+                  disable_auto_merge(app_token or token, node)
+                  comment(token, repo, pr_number, f"Auto-merge disabled: engine-owned PR. {ENGINE_MARKER}")
+
+
+          def evaluate_pr(token, app_token, repo, pr_number, gate_path, agent_gates_sha, denied, extra_paths, allow_dependabot, update_type, event_action):
+              pr = call(f"/repos/{repo}/pulls/{pr_number}", token=token)
+              node = pr.get("node_id")
+              reason = skip_reason(pr, denied, extra_paths)
+              if reason in ("engine-branch", "engine-author"):
+                  handle_engine_owned(token, app_token, repo, pr_number, pr)
+                  print(f"skip:{reason}")
+                  return
+              if event_action in ("labeled",) and reason == "hold":
+                  disable_auto_merge(app_token or token, node)
+                  print("auto_merge_disabled:hold")
+                  return
+              if event_action == "synchronize":
+                  disable_auto_merge(app_token or token, node)
+                  print("auto_merge_disabled:synchronize")
+              if reason:
+                  print(f"skip:{reason}")
+                  if reason in ("hold", "security"):
+                      disable_auto_merge(app_token or token, node)
+                  return
+              if not dependabot_allowed(pr, allow_dependabot, update_type):
+                  print("skip:dependabot-major")
+                  return
+              files = paginate(f"/repos/{repo}/pulls/{pr_number}/files", token=token, cap=30)
+              for f in files:
+                  for path in (f.get("filename"), f.get("previous_filename")):
+                      if path and (path_matches_any(path, denied) or path_matches_any(path, extra_paths)):
+                          print("skip:protected-path")
+                          return
+              base = (pr.get("base") or {}).get("ref") or "main"
+              if not gate_enforced(token, repo, base, gate_path, agent_gates_sha):
+                  print("skip:gate-not-enforced")
+                  return
+              head_sha = (pr.get("head") or {}).get("sha")
+              if not app_token:
+                  print("skip:no-app-token")
+                  return
+              if not enable_auto_merge(app_token, node, head_sha):
+                  direct_squash_merge(app_token, repo, pr_number, head_sha)
+
+
+          def list_open_prs(token, repo, base):
+              return paginate(f"/repos/{repo}/pulls?state=open&base={base}", token=token, cap=30)
+
+
+          def main():
+              token = env("GH_TOKEN")
+              app_token = env("HYGIENE_APP_TOKEN")
+              repo = env("REPO")
+              gate_path = env("REQUIRED_GATE_PATH", ".github/workflows/agent-review-of-record.yml")
+              agent_gates_sha = env("AGENT_GATES_SHA", "")
+              pr_number = env("PR_NUMBER")
+              event_action = env("EVENT_ACTION", "")
+              reconcile = env("RECONCILE", "").lower() in ("1", "true", "yes")
+              allow_dependabot = env("ALLOW_DEPENDABOT", "true").lower() == "true"
+              update_type = env("DEPENDABOT_UPDATE_TYPE", "")
+              extra = [p.strip() for p in env("EXTRA_PROTECTED_PATHS", "").split(",") if p.strip()]
+              base = env("DEFAULT_BRANCH", "main")
+
+              if repo not in TARGET_REPOS:
+                  print("skip:not-target-repo")
+                  return
+              if repo in FLOOR_NEVER_ALLOWLIST:
+                  print("skip:never-allowlist")
+                  return
+              if not token:
+                  fail(MODE, "GH_TOKEN missing")
+              denied, _never = fetch_manifest_denied(repo, base, mode=MODE)
+
+              targets = []
+              if pr_number:
+                  targets = [int(pr_number)]
+              elif reconcile:
+                  targets = [p["number"] for p in list_open_prs(token, repo, base)]
+                  print(f"reconcile prs={len(targets)}")
+              else:
+                  print("no PR_NUMBER and not RECONCILE; nothing to do")
+                  return
+
+              for num in targets:
+                  evaluate_pr(
+                      token,
+                      app_token,
+                      repo,
+                      num,
+                      gate_path,
+                      agent_gates_sha,
+                      denied,
+                      extra,
+                      allow_dependabot,
+                      update_type,
+                      event_action,
+                  )
+
+
+          if __name__ == "__main__":
+              main()
+          PY

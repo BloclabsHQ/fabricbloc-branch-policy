@@ -122,6 +122,14 @@ class TestHygieneContract(unittest.TestCase):
             sha = pins["hygiene_sha"]
             self.assertRegex(sha, r"^[0-9a-f]{40}$")
 
+    # --- C3 auto-merge ---
+
+
+    def test_auto_merge_embed_synced(self):
+        body = embedded("hygiene-auto-merge")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("auto_merge").rstrip("\n"))
+
 
 if __name__ == "__main__":
     unittest.main()
