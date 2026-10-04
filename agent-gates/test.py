@@ -140,18 +140,19 @@ def commit(login="Madgeniusblink", email="m@example.com", sha="c" * 40,
 def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", author_id=None,
           files=(".github/workflows/a.yml",), commits=None, reviews=(), manifest=MANIFEST, head=HEAD,
           changed=None, ncommits=None, renames=(), engine_config=None, base_ref="main",
-          commit_pulls=None):
+          commit_pulls=None, repo="BloclabsHQ/fabricbloc"):
     commits = [commit()] if commits is None else commits
     fl = [{"filename": f} for f in files] + [{"filename": n, "previous_filename": o} for o, n in renames]
+    pr_base = f"/repos/{repo}/pulls/7"
     routes = {
-        "/repos/BloclabsHQ/fabricbloc/pulls/7": {"head": {"sha": head, "ref": ref},
-                                                "base": {"sha": BASE, "ref": base_ref},
-                                                "user": {"login": author, "type": atype, **({"id": author_id} if author_id is not None else {})},
-                                                "changed_files": len(fl) if changed is None else changed,
-                                                "commits": len(commits) if ncommits is None else ncommits},
-        "/repos/BloclabsHQ/fabricbloc/pulls/7/files": fl,
-        "/repos/BloclabsHQ/fabricbloc/pulls/7/commits": commits,
-        "/repos/BloclabsHQ/fabricbloc/pulls/7/reviews": list(reviews),
+        f"{pr_base}": {"head": {"sha": head, "ref": ref},
+                       "base": {"sha": BASE, "ref": base_ref},
+                       "user": {"login": author, "type": atype, **({"id": author_id} if author_id is not None else {})},
+                       "changed_files": len(fl) if changed is None else changed,
+                       "commits": len(commits) if ncommits is None else ncommits},
+        f"{pr_base}/files": fl,
+        f"{pr_base}/commits": commits,
+        f"{pr_base}/reviews": list(reviews),
         "manifest": json.dumps(manifest) if manifest is not None else None,
         **({"config": engine_config} if engine_config is not None else {}),
     }
@@ -160,7 +161,7 @@ def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", au
         sha = c.get("sha")
         if not sha:
             continue
-        key = f"/repos/BloclabsHQ/fabricbloc/commits/{sha}/pulls"
+        key = f"/repos/{repo}/commits/{sha}/pulls"
         if sha in commit_pulls:
             routes[key] = commit_pulls[sha]
         elif base_ref == "main":
@@ -434,6 +435,25 @@ class T(unittest.TestCase):
     def test_unknown_repo_fails(self):
         self.assertEqual(run("agent-denied-paths", repo="BloclabsHQ/other")[0], 1)
 
+    def test_target_repos_includes_fabricbloc_context_keyflo(self):
+        repos = load_gate_constants()["TARGET_REPOS"]
+        self.assertEqual(
+            repos,
+            {
+                "BloclabsHQ/fabricbloc",
+                "BloclabsHQ/context",
+                "BloclabsHQ/keyflo-session-issuer",
+            },
+        )
+
+    def test_onboarded_repo_context_human_pr_passes_denied_paths(self):
+        setup(files=("docs/x.md",), repo="BloclabsHQ/context")
+        self.assertEqual(run("agent-denied-paths", repo="BloclabsHQ/context")[0], 0)
+
+    def test_onboarded_repo_keyflo_human_pr_passes_denied_paths(self):
+        setup(files=("docs/x.md",), repo="BloclabsHQ/keyflo-session-issuer")
+        self.assertEqual(run("agent-denied-paths", repo="BloclabsHQ/keyflo-session-issuer")[0], 0)
+
     def test_review_none_fails(self):
         setup(files=("docs/x.md",), **AGENT)
         self.assertEqual(run("agent-review-of-record")[0], 1)
@@ -608,6 +628,13 @@ class T(unittest.TestCase):
         self.assertIn("~DEFAULT_BRANCH", inc)
         self.assertIn("refs/heads/release/**", inc)
         self.assertIn("refs/heads/prod/**", inc)
+
+    def test_canon_agent_gates_repository_name_matches_target_repos(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        short = set(gates["conditions"]["repository_name"]["include"])
+        expected = {r.split("/", 1)[1] for r in load_gate_constants()["TARGET_REPOS"]}
+        self.assertEqual(short, expected)
 
     def test_canon_push_protected_paths_covers_workflows(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())

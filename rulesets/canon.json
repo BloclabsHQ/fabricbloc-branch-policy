@@ -33,7 +33,9 @@
       "conditions": {
         "repository_name": {
           "include": [
-            "fabricbloc"
+            "fabricbloc",
+            "context",
+            "keyflo-session-issuer"
           ],
           "exclude": [],
           "protected": true

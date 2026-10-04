@@ -19,7 +19,7 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 
 | Ruleset | Scope | Enforces | Bypass |
 |---|---|---|---|
-| `canon-agent-gates` | org → fabricbloc `~DEFAULT_BRANCH`, `release/**`, `prod/**` (bootstrap: `refs/heads/f6-gate-test`; step 5 widens ref scope in org UI) | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (F6 + finding c base-ref rule) | none |
+| `canon-agent-gates` | org → `fabricbloc`, `context`, `keyflo-session-issuer` each on `~DEFAULT_BRANCH`, `release/**`, `prod/**` (bootstrap: `refs/heads/f6-gate-test`; step 5 widens ref scope in org UI) | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (F6 + finding c base-ref rule) | none |
 | `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8e6a8e` | none |
 | `main-required-ci` | fabricbloc `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR with 0 approvals and squash only, 9 contexts pinned to Actions 15368 | OrganizationAdmin (`pull_request`) |
 | `canon-branch-creation-restricted` (finding c B) | fabricbloc `refs/heads/**` minus main, `agent/**`, explicit GOV-0022 handle paths (`dependabot/**` blocked until configured) | Blocks branch **creation** for non-exempt names | none (disable ruleset) |
@@ -31,3 +31,5 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 | `policy-main-protected` | this repo `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR required, only admins may update | OrganizationAdmin (`pull_request`) |
 
 Validate: `python3 agent-gates/validate_canon.py` (checks every body against GitHub's OpenAPI schema). The apply-workflow spec is unchanged from the cursor-env draft: a company App with org `administration: write`, upsert by name, never delete, and dispatch `policy-applied` to fabricbloc. That App is never a bypass actor.
+
+**Policy ownership:** Changes to org gate targeting (`TARGET_REPOS` in `agent-gates/embedded_gate.py`, `canon-agent-gates` `repository_name` in `canon.json`) are owned by **Warden** (FabricBloc tech-policy owner bot). Human CODEOWNERS review stays unchanged.

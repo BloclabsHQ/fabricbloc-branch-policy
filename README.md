@@ -176,7 +176,7 @@ Safe order: **(a) → main-required-ci 9 contexts → Q12 → Q14 (after the ide
 
 ## Runbook: required workflows vs decoy checks
 
-Org ruleset `canon-agent-gates` (org ruleset id **24445414**) enforces `agent-denied-paths` and `agent-review-of-record` from **this** repo at a **pinned commit SHA** (`rulesets/canon.json` → `workflows[].sha`), not from the PR branch. Optional org ruleset `canon-branch-name-guard-pinned` pins the same way for `branch-name-guard`.
+Org ruleset `canon-agent-gates` (org ruleset id **24445414**) enforces `agent-denied-paths` and `agent-review-of-record` from **this** repo at a **pinned commit SHA** (`rulesets/canon.json` → `workflows[].sha`), not from the PR branch. Onboarded target repositories are listed in `TARGET_REPOS` (`agent-gates/embedded_gate.py`) and mirrored in `canon-agent-gates` → `conditions.repository_name.include` (`fabricbloc`, `context`, `keyflo-session-issuer`; default branch `main` for gates). Optional org ruleset `canon-branch-name-guard-pinned` pins the same way for `branch-name-guard` (fabricbloc only).
 
 **Decoy checks.** A PR can add a repo-local workflow job with the same display name that exits 0. That green row is **not** the gate. The authoritative run is the one whose check details link to  
 `https://github.com/BloclabsHQ/fabricbloc/actions/required_workflows/<ruleset-workflow-id>`  

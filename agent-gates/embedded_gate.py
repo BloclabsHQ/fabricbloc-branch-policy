@@ -6,7 +6,11 @@
 import json, os, re, sys, urllib.error, urllib.parse, urllib.request
 
 SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
-TARGET_REPOS = {"BloclabsHQ/fabricbloc"}
+TARGET_REPOS = {
+    "BloclabsHQ/fabricbloc",
+    "BloclabsHQ/context",
+    "BloclabsHQ/keyflo-session-issuer",
+}
 DEFAULT_BASE_REF = "main"
 MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
 ENGINE_CONFIG = "agents/runtime/engine/config.yaml"
