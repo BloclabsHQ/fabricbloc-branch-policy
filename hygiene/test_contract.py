@@ -130,6 +130,12 @@ class TestHygieneContract(unittest.TestCase):
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("auto_merge").rstrip("\n"))
 
+    def test_auto_merge_mints_token_with_hygiene_app_client_id(self):
+        text = (WF / "hygiene-auto-merge.yml").read_text()
+        self.assertIn("client-id: ${{ vars.HYGIENE_APP_CLIENT_ID }}", text)
+        self.assertIn("vars.HYGIENE_APP_CLIENT_ID != ''", text)
+        self.assertNotRegex(text, r"app-id:\s*\$\{\{\s*vars\.HYGIENE_APP_ID")
+
 
 if __name__ == "__main__":
     unittest.main()
