@@ -22,6 +22,8 @@ GITHUB_HOSTED_RUNNER_LABELS = frozenset({
     "macos-latest", "macos-15", "macos-14", "macos-13",
 })
 HEAD, BASE, OLD = "h" * 40, "b" * 40, "o" * 40
+REVIEWER_BOT = "fabricbloc-reviewer[bot]"
+REVIEWER_BOT_ID = 337673700
 
 
 def validate_required_gate_hosted_only(name, doc):
@@ -291,7 +293,7 @@ def run_with_reviewer_bots(mode, bots, **kwargs):
     pairs = ", ".join(repr((str(b[0]), int(b[1]))) for b in bots)
     body = embedded(mode)
     body = re.sub(
-        r"^REVIEWER_APP_BOTS = set\(\)",
+        r"^REVIEWER_APP_BOTS = \{[^\n]*\}",
         f"REVIEWER_APP_BOTS = {{{pairs}}}",
         body,
         count=1,
@@ -743,67 +745,62 @@ class T(unittest.TestCase):
         self.assertEqual(code, 1, out)
 
     def test_reviewer_app_approval_at_head_valid_body_passes(self):
-        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
-        bot = "fabricbloc-reviewer[bot]"
-        bots = [[bot, 999001]]
+        cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
         setup(files=("docs/x.md",),
-              reviews=[approve(bot, body=reviewer_body(), user_id=999001)],
+              reviews=[approve(REVIEWER_BOT, body=reviewer_body(), user_id=REVIEWER_BOT_ID)],
               engine_config=cfg, **AGENT)
-        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
-        self.assertEqual(code, 0, out)
+        self.assertEqual(run("agent-review-of-record")[0], 0)
 
     def test_reviewer_app_wrong_numeric_id_fails(self):
-        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
-        bot = "fabricbloc-reviewer[bot]"
-        bots = [[bot, 999001]]
+        cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
         setup(files=("docs/x.md",),
-              reviews=[approve(bot, body=reviewer_body(), user_id=999002)],
+              reviews=[approve(REVIEWER_BOT, body=reviewer_body(), user_id=REVIEWER_BOT_ID + 1)],
               engine_config=cfg, **AGENT)
-        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
 
-    def test_reviewer_app_missing_sha_in_body_fails(self):
-        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
-        bot = "fabricbloc-reviewer[bot]"
-        bots = [[bot, 999001]]
+    def test_reviewer_app_wrong_login_right_id_fails(self):
+        cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
         setup(files=("docs/x.md",),
-              reviews=[approve(bot, body="approval-ref: cli:abcdef12", user_id=999001)],
+              reviews=[approve("spoof-reviewer[bot]", body=reviewer_body(), user_id=REVIEWER_BOT_ID)],
               engine_config=cfg, **AGENT)
-        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(run("agent-review-of-record")[0], 1)
+
+    def test_reviewer_app_missing_sha_in_body_fails(self):
+        cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
+        setup(files=("docs/x.md",),
+              reviews=[approve(REVIEWER_BOT, body="approval-ref: cli:abcdef12", user_id=REVIEWER_BOT_ID)],
+              engine_config=cfg, **AGENT)
+        code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
         self.assertIn("lacks full 40-char head SHA", out)
 
     def test_reviewer_app_missing_approval_ref_fails(self):
-        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
-        bot = "fabricbloc-reviewer[bot]"
-        bots = [[bot, 999001]]
+        cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
         setup(files=("docs/x.md",),
-              reviews=[approve(bot, body=HEAD, user_id=999001)],
+              reviews=[approve(REVIEWER_BOT, body=HEAD, user_id=REVIEWER_BOT_ID)],
               engine_config=cfg, **AGENT)
-        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
         self.assertIn("approval-ref", out)
 
     def test_reviewer_app_stale_commit_id_fails(self):
-        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
-        bot = "fabricbloc-reviewer[bot]"
-        bots = [[bot, 999001]]
+        cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
         setup(files=("docs/x.md",),
-              reviews=[approve(bot, sha=OLD, body=reviewer_body(OLD), user_id=999001)],
+              reviews=[approve(REVIEWER_BOT, sha=OLD, body=reviewer_body(OLD), user_id=REVIEWER_BOT_ID)],
               engine_config=cfg, **AGENT)
-        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
-        self.assertEqual(code, 1, out)
+        self.assertEqual(run("agent-review-of-record")[0], 1)
 
     def test_reviewer_app_never_human_skip(self):
         ns = load_gate_constants()
-        bots = {("fabricbloc-reviewer", 999001)}
-        humans = {"Madgeniusblink", "fabricbloc-reviewer"}
+        bots = ns["REVIEWER_APP_BOTS"]
+        humans = {"Madgeniusblink", REVIEWER_BOT}
         commits = [commit("Madgeniusblink")]
         applies, why = ns["gate_applies"](
-            "madgeniusblink/feat/x", "fabricbloc-reviewer", "User", 999001,
+            "madgeniusblink/feat/x", REVIEWER_BOT, "User", REVIEWER_BOT_ID,
             commits, "dev", "main", humans, set(), bots)
         self.assertTrue(applies)
-        self.assertIn("reviewer App author never qualifies for human skip", why[0])
+        self.assertFalse(any("GOV-0022 human ref owned" in w for w in why))
 
     def test_unparseable_ai_reviewers_fails_closed(self):
         cfg = "human: ['Madgeniusblink']\nai_reviewers:\n  - bot\n"
