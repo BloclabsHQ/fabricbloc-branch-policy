@@ -62,8 +62,10 @@ def pr_exempt_labels(labels):
 def event_timestamp(ev):
     et = ev.get("event")
     if et == "committed":
-        commit = ev.get("commit") or {}
-        committer = (commit.get("committer") or commit.get("author") or {})
+        committer = ev.get("committer") or ev.get("author") or {}
+        if not committer.get("date"):
+            commit = ev.get("commit") or {}
+            committer = commit.get("committer") or commit.get("author") or committer
         return parse_ts(committer.get("date")) or parse_ts(ev.get("created_at"))
     return parse_ts(ev.get("created_at") or ev.get("submitted_at"))
 
