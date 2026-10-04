@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      actions: read
       contents: write
       pull-requests: read
     steps:
@@ -245,12 +246,23 @@ jobs:
           """C5 weekly prune of merged agent/** branches (stdlib, API-only)."""
           import json
           import os
+          import re
           import time
 
 
           MODE = "hygiene-c5-branch-prune"
           BRANCH_GLOB_PREFIX = "agent/"
           MIN_AGE_HOURS_DEFAULT = 72
+          ACK_RUN_RE = re.compile(r"/actions/runs/(\d+)(?:[/?#]|$)")
+          ACK_URL_RE = re.compile(
+              r"(?:https?://)?(?:www\.)?github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/actions/runs/(?P<run_id>\d+)",
+              re.IGNORECASE,
+          )
+          POLICY_REPO = "BloclabsHQ/fabricbloc-branch-policy"
+          WORKFLOW_PATH = ".github/workflows/hygiene-branch-prune.yml"
+          REFERENCED_WORKFLOW_PATH_RE = re.compile(
+              r"(?i)BloclabsHQ/fabricbloc-branch-policy/\.github/workflows/hygiene-branch-prune\.yml@\S+"
+          )
 
 
           def env(name, default=""):
@@ -335,6 +347,69 @@ jobs:
               call(f"/repos/{repo}/git/refs/heads/{branch}", token=token, method="DELETE", allow_404=True)
 
 
+          def parse_ack_run_id(ack, current_repo):
+              ack = (ack or "").strip()
+              if not ack:
+                  return None
+              url = ACK_URL_RE.search(ack)
+              if url:
+                  url_repo = f"{url.group('owner')}/{url.group('repo')}"
+                  if url_repo.lower() != (current_repo or "").lower():
+                      fail(
+                          MODE,
+                          f"live refused: ack URL repo {url_repo!r} does not match current repo {current_repo!r}",
+                      )
+                  return url.group("run_id")
+              if ack.isdigit():
+                  return ack
+              m = ACK_RUN_RE.search(ack)
+              return m.group(1) if m else None
+
+
+          def verify_dryrun_ack(token, repo, ack):
+              run_id = parse_ack_run_id(ack, repo)
+              if not run_id:
+                  fail(
+                      MODE,
+                      "live refused: HYGIENE_C5_DRYRUN_ACK must be a completed dry-run run id or Actions run URL",
+                  )
+              try:
+                  run = call(f"/repos/{repo}/actions/runs/{run_id}", token=token, allow_404=True)
+              except HygieneAPIError as exc:
+                  fail(
+                      MODE,
+                      f"live refused: cannot read ack run {run_id}: GitHub API {exc.code} on {exc.path}",
+                  )
+              if run is None:
+                  fail(MODE, f"live refused: dry-run ack run {run_id} not found")
+              if run.get("status") != "completed":
+                  fail(
+                      MODE,
+                      f"live refused: dry-run ack run {run_id} status is {run.get('status')!r}, need completed",
+                  )
+              conclusion = run.get("conclusion")
+              if conclusion != "success":
+                  fail(
+                      MODE,
+                      f"live refused: dry-run ack run {run_id} conclusion is {conclusion!r}, need success",
+                  )
+              referenced = run.get("referenced_workflows") or []
+              policy_hits = []
+              for rw in referenced:
+                  rw_path = rw.get("path")
+                  if not rw_path:
+                      fail(MODE, "live refused: referenced_workflow entry missing path")
+                  if REFERENCED_WORKFLOW_PATH_RE.fullmatch(rw_path):
+                      policy_hits.append(rw_path)
+              if not policy_hits:
+                  fail(
+                      MODE,
+                      "live refused: ack run must reference "
+                      f"{POLICY_REPO}/{WORKFLOW_PATH}@<ref> via referenced_workflows",
+                  )
+              return run_id
+
+
           def main():
               token = env("GH_TOKEN")
               slack = env("SLACK_BOT_TOKEN")
@@ -347,8 +422,10 @@ jobs:
 
               if not token:
                   fail(MODE, "GH_TOKEN missing")
-              if mode == "live" and not ack:
-                  fail(MODE, "live refused: set HYGIENE_C5_DRYRUN_ACK to a completed dry-run run id")
+              if mode == "live":
+                  if not ack:
+                      fail(MODE, "live refused: set HYGIENE_C5_DRYRUN_ACK to a completed dry-run run id or URL")
+                  verify_dryrun_ack(token, repo, ack)
 
               delete_branch_on_merge = call(f"/repos/{repo}", token=token).get("delete_branch_on_merge")
               print(f"delete_branch_on_merge={delete_branch_on_merge}")
