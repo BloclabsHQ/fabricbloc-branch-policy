@@ -36,7 +36,6 @@ HYGIENE_EXTRA_PROTECTED = [
     "rulesets/",
 ]
 
-# Floor never_allowlist (manifest may extend; hygiene always applies proposed_additions).
 FLOOR_NEVER_ALLOWLIST = frozenset({
     "BloclabsHQ/fabric-iac",
     "BloclabsHQ/fabric-tss",
@@ -132,16 +131,26 @@ def path_matches_any(path, patterns):
     return False
 
 
-def fetch_manifest_denied(repo, ref):
+def fetch_manifest_denied(repo, ref, *, mode="hygiene-manifest"):
+    """Load denied paths from base manifest. Any failure fails closed (never skip)."""
+    qpath = urllib.parse.quote(MANIFEST, safe="")
+    qref = urllib.parse.quote(ref, safe="")
+    path = f"/repos/{repo}/contents/{qpath}?ref={qref}"
     try:
-        raw = call(
-            f"/repos/{repo}/contents/{urllib.parse.quote(MANIFEST, safe='')}?ref={urllib.parse.quote(ref, safe='')}",
-            accept="application/vnd.github.raw",
-        )
+        raw = call(path, accept="application/vnd.github.raw")
+    except HygieneAPIError as exc:
+        fail(mode, f"manifest unreadable at {ref}: {exc}")
+    if not isinstance(raw, str) or not raw.strip():
+        fail(mode, f"manifest missing or empty at {ref}")
+    try:
         data = json.loads(raw)
-    except (HygieneAPIError, json.JSONDecodeError, TypeError):
-        return list(FLOOR_DENIED), set(FLOOR_NEVER_ALLOWLIST)
-    dp = (data.get("denied_paths") or {}) if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        fail(mode, f"manifest invalid JSON at {ref}")
+    if not isinstance(data, dict):
+        fail(mode, f"manifest must be a JSON object at {ref}")
+    dp = data.get("denied_paths") or {}
+    if not isinstance(dp, dict):
+        fail(mode, "manifest denied_paths must be an object")
     denied = list(FLOOR_DENIED)
     denied += list(dp.get("arch_0048_baseline") or [])
     denied += list(dp.get("proposed_additions") or [])
@@ -167,3 +176,21 @@ def hygiene_enabled(c_var, org_var=None):
 
 
 MARKER_BOT_RE = re.compile(r"<!--\s*hygiene:([\w-]+):([^>]+)\s*-->")
+
+
+def slack_post_message(token, channel, text, thread_ts=None):
+    payload = {"channel": channel, "text": text, "unfurl_links": False, "unfurl_media": False}
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://slack.com/api/chat.postMessage",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = json.loads(resp.read().decode())
+    if not body.get("ok"):
+        raise RuntimeError(body.get("error") or "slack error")
+    return body.get("ts")
