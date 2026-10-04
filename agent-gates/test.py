@@ -208,7 +208,7 @@ def assert_creation_restricted_shape(canon):
     assert "refs/heads/**" in inc
     exc = rs["conditions"]["ref_name"]["exclude"]
     assert "refs/heads/main" in exc and "refs/heads/agent/**" in exc
-    assert "refs/heads/dependabot/**" in exc
+    assert "refs/heads/dependabot/**" not in exc
     for path in exc:
         assert "refs/heads/*/" not in path, f"wildcard handle exclude forbidden: {path}"
     ns = load_gate_constants()
@@ -675,6 +675,62 @@ class T(unittest.TestCase):
         Fake.routes[f"/repos/BloclabsHQ/fabricbloc/commits/{csha}/pulls"] = 500
         self.assertEqual(run("agent-denied-paths")[0], 1)
 
+    def test_commit_pulls_bad_top_level_shape_fails_closed(self):
+        csha = "0" * 40
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main")
+        Fake.routes[f"/repos/BloclabsHQ/fabricbloc/commits/{csha}/pulls"] = {"not": "a list"}
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_commit_pulls_missing_head_ref_fails_closed(self):
+        csha = "1" * 40
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main",
+              commit_pulls={csha: [{"user": {"login": "Madgeniusblink", "type": "User"}, "head": {}}]})
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("head.ref", out)
+
+    def test_commit_pulls_pagination_finds_agent_on_later_page(self):
+        csha = "2" * 40
+        benign = {"head": {"ref": "madgeniusblink/feat/y"}, "user": {"login": "Madgeniusblink", "type": "User"}}
+        agent_pull = {"head": {"ref": "agent/autonomous/fix/x-i1-y"},
+                      "user": {"login": "Madgeniusblink", "type": "User"}}
+        pulls = [benign] * 100 + [agent_pull]
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main",
+              commit_pulls={csha: pulls})
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+        self.assertIn("commits/pulls", out)
+
+    def test_lineage_bot_pr_author_type_is_agent_provenance(self):
+        csha = "3" * 40
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main",
+              commit_pulls={csha: [{"head": {"ref": "chore/index-regen-x"},
+                                    "user": {"login": "Madgeniusblink", "type": "Bot"}}]})
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+        self.assertIn("commits/pulls", out)
+
+    def test_coauthored_by_lowercase_trailer_and_display_name(self):
+        msg = "feat: x\n\nco-authored-by: CURSOR AGENT <cursoragent@cursor.com>"
+        setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
+              commits=[commit(message=msg)])
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("denied path", out)
+
+    def test_coauthored_by_second_trailer_agent(self):
+        msg = ("feat: x\n\nCo-authored-by: Madgeniusblink <m@example.com>\n"
+               "Co-authored-by: Cursor Agent <cursoragent@cursor.com>")
+        setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
+              commits=[commit(message=msg)])
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("denied path", out)
+
     def test_agent_head_human_commits_release_base_fails(self):
         setup(ref="agent/session/ci/x", files=("docs/x.md",),
               commits=[commit()], base_ref="release/x")
@@ -757,6 +813,108 @@ class T(unittest.TestCase):
         code, out = run_gate_with_patch("agent-denied-paths", patch)
         self.assertEqual(code, 0, out)
         self.assertNotIn("agent PRs must target main", out)
+
+    def test_mutation_lineage_ignores_bot_author_type(self):
+        csha = "3" * 40
+        pulls = [{"head": {"ref": "chore/index-regen-x"},
+                  "user": {"login": "Madgeniusblink", "type": "Bot"}}]
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main",
+              commit_pulls={csha: pulls})
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+
+        def patch(body):
+            return body.replace(') or user.get("type") == "Bot"', ")", 1)
+
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main",
+              commit_pulls={csha: pulls})
+        code, out = run_gate_with_patch("agent-review-of-record", patch)
+        self.assertEqual(code, 0, out)
+
+    def test_mutation_commit_pulls_bad_shape_passes_human_skip(self):
+        csha = "0" * 40
+        setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
+              commits=[commit(sha=csha)], base_ref="main")
+        Fake.routes[f"/repos/BloclabsHQ/fabricbloc/commits/{csha}/pulls"] = {"not": "a list"}
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+        def patch(body):
+            body = body.replace(
+                "    pulls = paginate(path, MAX_COMMIT_PULLS)",
+                "    pulls = call(path)\n    if not isinstance(pulls, list):\n        return False",
+                1,
+            )
+            validation = (
+                "    for p in pulls:\n"
+                "        if not isinstance(p, dict):\n"
+                "            fail(f\"unexpected API shape for commits/{commit_sha[:12]}/pulls entry\")\n"
+                "        head = p.get(\"head\")\n"
+                "        if not isinstance(head, dict) or \"ref\" not in head:\n"
+                "            fail(f\"commits/{commit_sha[:12]}/pulls entry missing head.ref; failing closed\")\n"
+            )
+            return body.replace(validation, "", 1)
+
+        setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
+              commits=[commit(sha=csha)], base_ref="main")
+        Fake.routes[f"/repos/BloclabsHQ/fabricbloc/commits/{csha}/pulls"] = {"not": "a list"}
+        code, out = run_gate_with_patch("agent-denied-paths", patch)
+        self.assertEqual(code, 0, out)
+
+    def test_mutation_coauthor_case_sensitive_trailer(self):
+        msg = "feat: x\n\nco-authored-by: CURSOR AGENT <cursoragent@cursor.com>"
+        setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
+              commits=[commit(message=msg)])
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+
+        def patch(body):
+            return body.replace(
+                'COAUTHOR_TRAILER_RE = re.compile(r"^Co-authored-by:\\s*(.+)$", re.MULTILINE | re.IGNORECASE)',
+                'COAUTHOR_TRAILER_RE = re.compile(r"^Co-authored-by:\\s*(.+)$", re.MULTILINE)',
+                1,
+            )
+
+        setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
+              commits=[commit(message=msg)])
+        code, out = run_gate_with_patch("agent-denied-paths", patch)
+        self.assertEqual(code, 0, out)
+
+    def test_mutation_coauthor_only_first_trailer(self):
+        msg = ("feat: x\n\nCo-authored-by: Madgeniusblink <m@example.com>\n"
+               "Co-authored-by: Cursor Agent <cursoragent@cursor.com>")
+        setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
+              commits=[commit(message=msg)])
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+
+        def patch(body):
+            old = (
+                "    for trailer in COAUTHOR_TRAILER_RE.findall(message):\n"
+                "        if _coauthor_trailer_agent(trailer):\n"
+                "            return True\n"
+                "    return False"
+            )
+            new = (
+                "    m = COAUTHOR_TRAILER_RE.search(message)\n"
+                "    return bool(m and _coauthor_trailer_agent(m.group(1)))"
+            )
+            return body.replace(old, new, 1)
+
+        setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
+              commits=[commit(message=msg)])
+        code, out = run_gate_with_patch("agent-denied-paths", patch)
+        self.assertEqual(code, 0, out)
+
+    def test_mutation_creation_restricted_exclude_refs_heads_glob(self):
+        import copy
+        canon = copy.deepcopy(load_canon())
+        inc = creation_restricted(canon)["conditions"]["ref_name"]["include"]
+        if "refs/heads/**" in inc:
+            inc.remove("refs/heads/**")
+        with self.assertRaises(AssertionError):
+            assert_creation_restricted_shape(canon)
 
     def test_gov_human_handles_match_canon_excludes(self):
         ns = load_gate_constants()

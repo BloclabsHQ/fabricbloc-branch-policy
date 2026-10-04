@@ -22,7 +22,7 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 | `canon-agent-gates` | org → fabricbloc `~DEFAULT_BRANCH`, `release/**`, `prod/**` (bootstrap: `refs/heads/f6-gate-test`; step 5 widens ref scope in org UI) | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (F6 + finding c base-ref rule) | none |
 | `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8e6a8e` | none |
 | `main-required-ci` | fabricbloc `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR with 0 approvals and squash only, 9 contexts pinned to Actions 15368 | OrganizationAdmin (`pull_request`) |
-| `canon-branch-creation-restricted` (finding c B) | fabricbloc `refs/heads/**` minus main, `agent/**`, `dependabot/**`, explicit GOV-0022 handle paths | Blocks branch **creation** for non-exempt names | none (disable ruleset) |
+| `canon-branch-creation-restricted` (finding c B) | fabricbloc `refs/heads/**` minus main, `agent/**`, explicit GOV-0022 handle paths (`dependabot/**` blocked until configured) | Blocks branch **creation** for non-exempt names | none (disable ruleset) |
 | `canon-deploy-branches-human-only` (finding c) | fabricbloc `release/**`, `prod/**` | Blocks **creation** and **update** | none (disable ruleset) |
 | `canon-agent-branches` | fabricbloc `agent/**` | No force-push | none |
 | `canon-provider-branches-blocked` (Q12) | fabricbloc `cursor/**` `codex/**` `claude/**` `qwen/**` | Creation blocked | none |

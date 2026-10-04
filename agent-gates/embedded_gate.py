@@ -43,6 +43,7 @@ APPROVAL_REF_RE = re.compile(
 HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
 MAX_FILES = 3000   # pulls/{n}/files hard limit
 MAX_COMMITS = 250  # pulls/{n}/commits hard limit
+MAX_COMMIT_PULLS = 500  # commits/{sha}/pulls hard limit
 
 API = os.environ.get("API", "https://api.github.com").rstrip("/")
 TOKEN = os.environ.get("GH_TOKEN", "")
@@ -177,9 +178,14 @@ def pull_is_agent_provenance(pr):
 
 
 def commit_came_from_agent_pr(commit_sha):
-    pulls = call(f"/repos/{REPO}/commits/{commit_sha}/pulls")
-    if not isinstance(pulls, list):
-        fail(f"unexpected API shape for commits/{commit_sha[:12]}/pulls")
+    path = f"/repos/{REPO}/commits/{commit_sha}/pulls"
+    pulls = paginate(path, MAX_COMMIT_PULLS)
+    for p in pulls:
+        if not isinstance(p, dict):
+            fail(f"unexpected API shape for commits/{commit_sha[:12]}/pulls entry")
+        head = p.get("head")
+        if not isinstance(head, dict) or "ref" not in head:
+            fail(f"commits/{commit_sha[:12]}/pulls entry missing head.ref; failing closed")
     return any(pull_is_agent_provenance(p) for p in pulls)
 
 

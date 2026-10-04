@@ -44,7 +44,7 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 
 **Layer C (gate + org scope):** `main` is the only merge target agents may use. The pinned gate fails closed when the PR carries agent identity and `base.ref != main` (`agent PRs must target main`). Agent identity includes: **`agent/**` head ref** (regardless of commit author); PR author or any commit author/committer matching the pinned agent list; **`Co-authored-by:`** trailers with agent emails or known agent display names; and for PRs **to `main`**, any commit whose associated pull requests (`GET /commits/{sha}/pulls`) include an **`agent/**` head** or agent PR author (covers squash merges authored as a human after agent work). Org ruleset `canon-agent-gates` also targets `refs/heads/release/**` and `refs/heads/prod/**`. A follow-up human PR to `main` is **not** exempt merely because squash commits show a human author.
 
-**Layer B (`canon-branch-creation-restricted`):** Repo ruleset on fabricbloc blocks **creation** of branches outside `main`, `agent/**`, `dependabot/**`, and explicit GOV-0022 paths `refs/heads/<handle>/<type>/**` for each handle in `GOV_HUMAN_HANDLES` in `embedded_gate.py` (sourced from fabricbloc manifest `operators.members_expected` / GOV-0022 — today **`madgeniusblink`** only, not `refs/heads/*/<type>/**`). Scoped with `refs/heads/**` plus excludes (this policy file never uses `~ALL`). **No standing bypass** — break-glass: an org owner sets the ruleset to **Disabled** (audit log).
+**Layer B (`canon-branch-creation-restricted`):** Repo ruleset on fabricbloc blocks **creation** of branches outside `main`, `agent/**`, and explicit GOV-0022 paths `refs/heads/<handle>/<type>/**` for each handle in `GOV_HUMAN_HANDLES` in `embedded_gate.py` (sourced from fabricbloc manifest `operators.members_expected` / GOV-0022 — today **`madgeniusblink`** only, not `refs/heads/*/<type>/**`). `dependabot/**` is **blocked** until fabricbloc has a `dependabot.yml` and a ruling adds the exemption back. Scoped with `refs/heads/**` plus excludes (this policy file never uses `~ALL`). **No standing bypass** — break-glass: an org owner sets the ruleset to **Disabled** (audit log).
 
 **Deploy branches (`canon-deploy-branches-human-only`):** `refs/heads/release/**` and `refs/heads/prod/**` **creation** and **update** are blocked with **no standing bypass** (same break-glass: disable the ruleset).
 
@@ -58,7 +58,7 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 |---|---|---|
 | `agent/**` | Allowed (exempt from creation-restricted) | Canonical agent work; gated by org workflows on merge targets |
 | `madgeniusblink/<type>/**` | Allowed | GOV-0022 human handle(s) from manifest / GOV-0022 |
-| `dependabot/**` | Allowed | Dependabot app-owned version bumps |
+| `dependabot/**` | Blocked (creation-restricted) | No `dependabot.yml` in fabricbloc yet; any actor could spoof the prefix — re-allow via ruleset exclude after Dependabot is configured |
 | `cursor/**`, `codex/**`, `claude/**`, `qwen/**` | Blocked (`canon-provider-branches-blocked`, Q12) | Agents use `agent/**`, not provider-default prefixes |
 | `workboard/<hash>` | Blocked (creation-restricted) | Ephemeral workboard heads from automation; not a human handle or `agent/**` — use `agent/**` or a GOV-0022 handle branch |
 | `chore/index-regen-*` (legacy) | Blocked unless renamed | fabricbloc `index-regen.yml` must push `agent/autonomous/chore/index-regen-<run_id>` instead (see PR body; not edited here if workflow lives only in fabricbloc) |

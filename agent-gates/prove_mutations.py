@@ -47,6 +47,11 @@ def main():
         ("Remove refs/heads/** from creation-restricted include",
          lambda c: creation_restricted(c)["conditions"]["ref_name"]["include"].remove("refs/heads/**"),
          check_creation,
+         "test_mutation_creation_restricted_exclude_refs_heads_glob"),
+        ("Replace creation-restricted include with main only",
+         lambda c: creation_restricted(c)["conditions"]["ref_name"].__setitem__(
+             "include", ["refs/heads/main"]),
+         check_creation,
          "test_mutation_creation_restricted_without_include_all_heads"),
         ("Set creation-restricted enforcement to disabled",
          lambda c: creation_restricted(c).__setitem__("enforcement", "disabled"),
@@ -97,6 +102,43 @@ def main():
              count=1,
          ),
          "test_mutation_removing_author_leg_misses_base_rule"),
+        ("Lineage ignores PRs whose author type is Bot",
+         lambda s: s.replace(') or user.get("type") == "Bot"', ")", 1),
+         "test_mutation_lineage_ignores_bot_author_type"),
+        ("Commits/pulls skips fail-closed on bad API shape",
+         lambda s: s.replace(
+             "    pulls = paginate(path, MAX_COMMIT_PULLS)",
+             "    pulls = call(path)\n    if not isinstance(pulls, list):\n        return False",
+             1,
+         ).replace(
+             "    for p in pulls:\n"
+             "        if not isinstance(p, dict):\n"
+             "            fail(f\"unexpected API shape for commits/{commit_sha[:12]}/pulls entry\")\n"
+             "        head = p.get(\"head\")\n"
+             "        if not isinstance(head, dict) or \"ref\" not in head:\n"
+             "            fail(f\"commits/{commit_sha[:12]}/pulls entry missing head.ref; failing closed\")\n",
+             "",
+             1,
+         ),
+         "test_mutation_commit_pulls_bad_shape_passes_human_skip"),
+        ("Co-authored-by match is case-sensitive on trailer prefix",
+         lambda s: s.replace(
+             'COAUTHOR_TRAILER_RE = re.compile(r"^Co-authored-by:\\s*(.+)$", re.MULTILINE | re.IGNORECASE)',
+             'COAUTHOR_TRAILER_RE = re.compile(r"^Co-authored-by:\\s*(.+)$", re.MULTILINE)',
+             1,
+         ),
+         "test_mutation_coauthor_case_sensitive_trailer"),
+        ("Only the first Co-authored-by trailer is scanned",
+         lambda s: s.replace(
+             "    for trailer in COAUTHOR_TRAILER_RE.findall(message):\n"
+             "        if _coauthor_trailer_agent(trailer):\n"
+             "            return True\n"
+             "    return False",
+             "    m = COAUTHOR_TRAILER_RE.search(message)\n"
+             "    return bool(m and _coauthor_trailer_agent(m.group(1)))",
+             1,
+         ),
+         "test_mutation_coauthor_only_first_trailer"),
     ]
     for label, mut, test_name in gate_mutations:
         GATE_PATH.write_text(mut(orig_gate))

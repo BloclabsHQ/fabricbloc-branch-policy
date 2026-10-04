@@ -209,7 +209,7 @@
       "_repository": "fabricbloc",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B. Stops agents from creating a fresh ungated base branch (for example f6-gate-retarget-probe).",
-      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, dependabot/** (Dependabot app), and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). dependabot/** is blocked until fabricbloc has dependabot.yml and a ruling re-adds the exemption. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -220,7 +220,6 @@
           "exclude": [
             "refs/heads/main",
             "refs/heads/agent/**",
-            "refs/heads/dependabot/**",
             "refs/heads/madgeniusblink/feat/**",
             "refs/heads/madgeniusblink/fix/**",
             "refs/heads/madgeniusblink/chore/**",
