@@ -82,7 +82,10 @@ class TestHygieneContract(unittest.TestCase):
         self.assertIn("github.event_name == 'schedule'", cond.replace("\n", " "))
         self.assertIn("inputs.sweep", cond)
         notify = jobs.get("notify") or {}
-        self.assertEqual(notify.get("needs"), ["plan"])
+        needs = notify.get("needs")
+        if isinstance(needs, str):
+            needs = [needs]
+        self.assertEqual(needs, ["plan"])
 
     def test_canon_hygiene_sha_when_present(self):
         import json
