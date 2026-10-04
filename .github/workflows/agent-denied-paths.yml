@@ -109,10 +109,9 @@ jobs:
           HUMAN_BRANCH_TYPES = (
               "feat", "fix", "chore", "docs", "refactor", "test", "ci", "perf", "revert", "build", "style",
           )
-          # Dedicated reviewer GitHub App (fabricbloc-reviewer). Cris fills after App creation:
-          #   REVIEWER_APP_BOTS = {("fabricbloc-reviewer[bot]", <id from GET /users/fabricbloc-reviewer%5Bbot%5D>)}
-          # Empty until then: no App approval can count (fail closed). Re-pin ruleset SHA after change.
-          REVIEWER_APP_BOTS = set()
+          # Dedicated reviewer GitHub App (fabricbloc-reviewer). Login + numeric user id must both match.
+          # Re-pin org ruleset SHA after any change. App counts only via target repo ai_reviewers (F6-D10).
+          REVIEWER_APP_BOTS = {("fabricbloc-reviewer[bot]", 337673700)}
           APPROVAL_REF_RE = re.compile(
               r"approval-ref:\s*(slack:\d+\.\d+|cli:[A-Za-z0-9._-]{6,64})")
           HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")

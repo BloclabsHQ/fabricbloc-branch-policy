@@ -32,5 +32,5 @@ Do not use `secrets: inherit`.
 
 ## TODO(Cris) credentials (not created in this repo)
 
-- **T1** (`fabricbloc-hygiene` GitHub App): C2 stale close and C3 auto-merge (live). Callers pass `secrets.HYGIENE_APP_PRIVATE_KEY` and `vars.HYGIENE_APP_CLIENT_ID` (GitHub App Client ID, not numeric App ID).
+- **T1** (`fabricbloc-hygiene` GitHub App, numeric App ID **5184966**, installation **167787762** on `fabricbloc`, `context`, `keyflo-session-issuer`): C2 stale close and C3 auto-merge (live). Set org or repo variable **`HYGIENE_APP_CLIENT_ID`** = `Iv23lirH8HiEe4cZj3V8` (GitHub App **Client ID**, not the numeric App ID). Set org or repo secret **`HYGIENE_APP_PRIVATE_KEY`** to the App’s PEM private key (Cris adds in GitHub; **never** commit to the repo). Callers pass `secrets.HYGIENE_APP_PRIVATE_KEY` and `vars.HYGIENE_APP_CLIENT_ID` into the reusable hygiene workflows.
 - **T2** `SLACK_BOT_TOKEN`: org secret restricted to selected repos (C1, C5). Sentinel confirms no PR-head execution in hygiene jobs.
