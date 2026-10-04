@@ -19,10 +19,12 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 
 | Ruleset | Scope | Enforces | Bypass |
 |---|---|---|---|
-| `canon-agent-gates` | org → fabricbloc bootstrap: `refs/heads/f6-gate-test` only (`_bootstrap_ref_include`); after step 5 widen to `_post_rollout_ref_include` (`~DEFAULT_BRANCH`, `release/**`, `prod/**`) and clear `_bootstrap_ref_include` | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (F6 + finding c base-ref rule; bootstrap base allowance embedded from `_bootstrap_ref_include` at pin) | none |
-| `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8e6a8e` | none |
+| `canon-agent-gates` | org → `fabricbloc`, `context`, `keyflo-session-issuer`; bootstrap: `refs/heads/f6-gate-test` only (`_bootstrap_ref_include`); after step 5 widen to `_post_rollout_ref_include` (`~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`) and clear `_bootstrap_ref_include` | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (agent merge bases: repo `default_branch` or `main` from the event; bootstrap base allowance embedded from `_bootstrap_ref_include` at pin) | none |
+| `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8a5985` (see `pins.branch_name_guard_sha`) | none |
 | `main-required-ci` | fabricbloc `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR with 0 approvals and squash only, 9 contexts pinned to Actions 15368 | OrganizationAdmin (`pull_request`) |
 | `canon-branch-creation-restricted` (finding c B) | fabricbloc `refs/heads/**` minus main, `agent/**`, explicit GOV-0022 handle paths (`dependabot/**` blocked until configured); excludes must not cover all branches (`refs/heads/**`, `~ALL`, etc.) | Blocks branch **creation** for non-exempt names | none (disable ruleset) |
+| `canon-branch-creation-restricted` | context — same exempt set as fabricbloc (default **main**) | Blocks branch **creation** outside main, `agent/**`, and GOV-0022 handle paths | none (disable ruleset) |
+| `canon-branch-creation-restricted` | keyflo-session-issuer — fabricbloc set plus **`dev`** (repo default) | Blocks branch **creation** outside dev, main, `agent/**`, and handle paths | none (disable ruleset) |
 | `canon-deploy-branches-human-only` (finding c) | fabricbloc `release/**`, `prod/**` | Blocks **creation** and **update** | none (disable ruleset) |
 | `canon-agent-branches` | fabricbloc `agent/**` | No force-push | none |
 | `canon-provider-branches-blocked` (Q12) | fabricbloc `cursor/**` `codex/**` `claude/**` `qwen/**` | Creation blocked | none |
@@ -33,3 +35,13 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 The orphan `ledger` branch on fabricbloc (harvest/retention workflows, `agent-run-ledger`, review-lane scripts) already exists; creation-restricted does not block **updates** to it. No `ledger` exclude — if the branch is deleted, disable this ruleset to recreate it, then re-enable (drift flags the disabled interval).
 
 Validate: `python3 agent-gates/validate_canon.py` (checks every body against GitHub's OpenAPI schema). The apply-workflow spec is unchanged from the cursor-env draft: a company App with org `administration: write`, upsert by name, never delete, and dispatch `policy-applied` to fabricbloc. That App is never a bypass actor.
+
+## Ruleset drift (live GitHub vs this file)
+
+Recorded deltas so cursor-env / manual audits do not treat intentional live state as surprise drift:
+
+| Live ruleset | ID | Note |
+|---|---|---|
+| `main-required-ci` (fabricbloc) | 20436874 | **Require branches to be up to date before merging** is **OFF**, matching `canon.json` `strict_required_status_checks_policy: false`. The **six** required status check contexts are unchanged from the pre-toggle set. **Merge queue** is not available on GitHub Team for private repos (documented limitation; not in canon). |
+
+**Policy ownership:** Changes to org gate targeting (`TARGET_REPOS` in `agent-gates/embedded_gate.py`, `canon-agent-gates` `repository_name` in `canon.json`) are owned by **Warden** (FabricBloc tech-policy owner bot). Human CODEOWNERS review stays unchanged.
