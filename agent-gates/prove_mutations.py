@@ -44,10 +44,14 @@ def main():
         t.assert_deploy_human_only_shape(c)
 
     mutations = [
+        ("Add refs/heads/** to creation-restricted exclude",
+         lambda c: creation_restricted(c)["conditions"]["ref_name"]["exclude"].append("refs/heads/**"),
+         check_creation,
+         "test_mutation_creation_restricted_exclude_refs_heads_glob"),
         ("Remove refs/heads/** from creation-restricted include",
          lambda c: creation_restricted(c)["conditions"]["ref_name"]["include"].remove("refs/heads/**"),
          check_creation,
-         "test_mutation_creation_restricted_exclude_refs_heads_glob"),
+         "test_mutation_creation_restricted_without_include_all_heads"),
         ("Replace creation-restricted include with main only",
          lambda c: creation_restricted(c)["conditions"]["ref_name"].__setitem__(
              "include", ["refs/heads/main"]),
@@ -107,7 +111,7 @@ def main():
          "test_mutation_lineage_ignores_bot_author_type"),
         ("Commits/pulls skips fail-closed on bad API shape",
          lambda s: s.replace(
-             "    pulls = paginate(path, MAX_COMMIT_PULLS)",
+             "    pulls = paginate(path, MAX_COMMIT_PULLS, fail_at_cap=True)",
              "    pulls = call(path)\n    if not isinstance(pulls, list):\n        return False",
              1,
          ).replace(
@@ -139,6 +143,13 @@ def main():
              1,
          ),
          "test_mutation_coauthor_only_first_trailer"),
+        ("Lineage continues at commits/pulls pagination cap",
+         lambda s: s.replace(
+             "pulls = paginate(path, MAX_COMMIT_PULLS, fail_at_cap=True)",
+             "pulls = paginate(path, MAX_COMMIT_PULLS)",
+             1,
+         ),
+         "test_mutation_commit_pulls_continues_at_cap_passes_human_skip"),
     ]
     for label, mut, test_name in gate_mutations:
         GATE_PATH.write_text(mut(orig_gate))
