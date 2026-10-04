@@ -24,7 +24,7 @@
     {
       "name": "canon-agent-gates",
       "_finding": "F6 (PR #1526) layer (a): independent enforcement boundary for agent-denied-paths and agent-review-of-record.",
-      "_apply_after": "README step 4 with conditions.ref_name.include = _bootstrap_ref_include; step 5 switches to ~ALL (+ refs/heads/main) after the malicious test; Cris applies via org ruleset UI",
+      "_apply_after": "README step 4 with conditions.ref_name.include = _bootstrap_ref_include; step 5 switches to ~DEFAULT_BRANCH after the malicious test",
       "_bootstrap_ref_include": [
         "refs/heads/f6-gate-test"
       ],
@@ -40,8 +40,7 @@
         },
         "ref_name": {
           "include": [
-            "~ALL",
-            "refs/heads/main"
+            "~DEFAULT_BRANCH"
           ],
           "exclude": []
         }

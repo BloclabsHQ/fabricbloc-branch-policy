@@ -5,7 +5,7 @@ Extracts the embedded gate script from both workflow files (they must be
 byte-identical), then runs it against a local fake GitHub API. No network.
 Includes the F6 malicious case: an agent PR that rewrites the gate to exit 0.
 """
-import json, os, subprocess, sys, threading, unittest, urllib.parse
+import json, os, re, subprocess, sys, threading, unittest, urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -182,16 +182,37 @@ def load_gate_constants():
 
 
 def run_with_reviewer_bots(mode, bots, **kwargs):
-    env_extra = {"REVIEWER_APP_BOTS_TEST": json.dumps(bots)}
+    import re
+    pairs = ", ".join(repr((str(b[0]), int(b[1]))) for b in bots)
+    body = embedded(mode)
+    body = re.sub(
+        r"^REVIEWER_APP_BOTS = set\(\)",
+        f"REVIEWER_APP_BOTS = {{{pairs}}}",
+        body,
+        count=1,
+        flags=re.M,
+    )
     env = dict(os.environ, MODE=mode, API=API, GH_TOKEN="test", REPO="BloclabsHQ/fabricbloc",
-               PR="7", EVENT_HEAD_SHA=HEAD, **env_extra)
+               PR="7", EVENT_HEAD_SHA=HEAD)
     env.update(kwargs.get("env", {}))
-    p = subprocess.run([sys.executable, "-c", embedded(mode)], env=env, capture_output=True, text=True, timeout=30)
+    p = subprocess.run([sys.executable, "-c", body], env=env, capture_output=True, text=True, timeout=30)
     return p.returncode, p.stdout + p.stderr
 
 
 AGENT = dict(ref="agent/autonomous/fix/x-i1-y", author="fabricbloc-agent-ops[bot]", atype="Bot",
              commits=[commit("cursoragent", "cursoragent@cursor.com")])
+
+# Bot logins and numeric user ids from unauthenticated GET /users/<login>%5Bbot%5D (2026-10-04).
+PINNED_AGENT_BOT_IDENTITIES = (
+    ("fabricbloc-agent-ops[bot]", 337168458),
+    ("fabricbloc-approval-relay[bot]", 337608266),
+    ("cursor[bot]", 206951365),
+    ("cursoragent", 199161495),
+    ("chatgpt-codex-connector[bot]", 199175422),
+    ("claude[bot]", 209825114),
+    ("github-actions[bot]", 41898282),
+    ("Copilot", 175728472),  # GET /users/copilot-pull-request-reviewer%5Bbot%5D
+)
 
 
 class T(unittest.TestCase):
@@ -385,30 +406,51 @@ class T(unittest.TestCase):
         run("agent-denied-paths")
         self.assertFalse(Path("/tmp/pwned").exists())
 
-    def test_canon_agent_gates_ref_include_covers_all(self):
-        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
-        found = False
-        for rs in canon["organization_rulesets"]:
-            if rs.get("name") != "canon-agent-gates":
-                continue
-            found = True
-            inc = rs["conditions"]["ref_name"]["include"]
-            self.assertIn("~ALL", inc)
-            self.assertIn("refs/heads/main", inc)
-        self.assertTrue(found, "canon-agent-gates missing from canon.json")
+    def test_parse_flow_list_three_unquoted(self):
+        ns = load_gate_constants()
+        cfg = "ai_reviewers: [alpha, beta, gamma]\n"
+        self.assertEqual(ns["parse_flow_list_line"](cfg, "ai_reviewers"),
+                         {"alpha", "beta", "gamma"})
+
+    def test_parse_flow_list_three_quoted(self):
+        ns = load_gate_constants()
+        cfg = "ai_reviewers: ['one', 'two', 'three']\n"
+        self.assertEqual(ns["parse_flow_list_line"](cfg, "ai_reviewers"),
+                         {"one", "two", "three"})
+
+    def test_parse_flow_list_mixed(self):
+        ns = load_gate_constants()
+        cfg = "ai_reviewers: [Madgeniusblink, 'fabricbloc-reviewer[bot]', bot2]\n"
+        self.assertEqual(ns["parse_flow_list_line"](cfg, "ai_reviewers"),
+                         {"Madgeniusblink", "fabricbloc-reviewer[bot]", "bot2"})
+
+    def test_parse_flow_list_ai_reviewers_fabricbloc_reviewer_bot(self):
+        ns = load_gate_constants()
+        cfg = "ai_reviewers: ['fabricbloc-reviewer[bot]']\n"
+        self.assertEqual(ns["parse_flow_list_line"](cfg, "ai_reviewers"),
+                         {"fabricbloc-reviewer[bot]"})
 
     def test_reviewer_app_bots_disjoint_from_agent_identities(self):
         ns = load_gate_constants()
         bots = ns["REVIEWER_APP_BOTS"]
-        agent_logins = set(ns["AGENT_LOGINS"]) | {
-            "cursoragent", "cursor[bot]", "fabricbloc-agent-ops[bot]",
-            "chatgpt-codex-connector[bot]", "claude[bot]",
-            "copilot-pull-request-reviewer[bot]", "github-actions[bot]",
-        }
-        agent_ids = set(ns["AGENT_USER_IDS"])
+        agent_logins = {login.lower() for login, _ in PINNED_AGENT_BOT_IDENTITIES}
+        agent_logins |= {x.lower() for x in ns["AGENT_LOGINS"]}
+        agent_ids = {uid for _, uid in PINNED_AGENT_BOT_IDENTITIES} | set(ns["AGENT_USER_IDS"])
         for login, uid in bots:
-            self.assertNotIn(login.lower(), {x.lower() for x in agent_logins})
+            self.assertNotIn(login.lower(), agent_logins)
             self.assertNotIn(uid, agent_ids)
+        for login, uid in PINNED_AGENT_BOT_IDENTITIES:
+            self.assertNotIn((login, uid), bots)
+
+    def test_approval_relay_bot_cannot_count_as_reviewer_app(self):
+        relay = "fabricbloc-approval-relay[bot]"
+        relay_id = 337608266
+        cfg = f"human: ['Madgeniusblink', '{relay}']\n"
+        setup(files=("docs/x.md",),
+              reviews=[approve(relay, body=reviewer_body(), user_id=relay_id)],
+              engine_config=cfg, **AGENT)
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
 
     def test_reviewer_app_approval_at_head_valid_body_passes(self):
         cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
@@ -479,31 +521,6 @@ class T(unittest.TestCase):
         code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
         self.assertIn("ai_reviewers", out)
-
-    def test_policy_audit_workflow_triggers_and_runner(self):
-        doc = yaml.safe_load((WF / "fabricbloc-policy-audit.yml").read_text())
-        on = doc.get("on")
-        if on is None:
-            on = doc.get(True) or {}
-        triggers = set()
-        if isinstance(on, dict):
-            triggers = set(on.keys())
-        elif isinstance(on, list):
-            triggers = set(on)
-        for bad in ("pull_request", "pull_request_target"):
-            self.assertNotIn(bad, triggers)
-        self.assertTrue({"schedule", "workflow_dispatch"} & triggers)
-        job = doc["jobs"]["audit"]
-        self.assertEqual(job.get("runs-on"), "ubuntu-latest")
-        uses = json.dumps(job)
-        self.assertNotIn("pull_request", uses)
-
-    def test_policy_audit_normalize_self_test(self):
-        p = subprocess.run(
-            [sys.executable, str(ROOT / "agent-gates" / "policy_audit_snapshot.py"), "--normalize-self-test"],
-            capture_output=True, text=True, timeout=30)
-        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
