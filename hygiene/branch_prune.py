@@ -11,6 +11,11 @@ MODE = "hygiene-c5-branch-prune"
 BRANCH_GLOB_PREFIX = "agent/"
 MIN_AGE_HOURS_DEFAULT = 72
 ACK_RUN_RE = re.compile(r"/actions/runs/(\d+)(?:[/?#]|$)")
+ACK_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/actions/runs/(?P<run_id>\d+)",
+    re.IGNORECASE,
+)
+POLICY_REPO = "BloclabsHQ/fabricbloc-branch-policy"
 WORKFLOW_PATH = ".github/workflows/hygiene-branch-prune.yml"
 
 
@@ -96,24 +101,49 @@ def delete_branch(token, repo, branch):
     call(f"/repos/{repo}/git/refs/heads/{branch}", token=token, method="DELETE", allow_404=True)
 
 
-def parse_ack_run_id(ack):
+def parse_ack_run_id(ack, current_repo):
     ack = (ack or "").strip()
     if not ack:
         return None
+    url = ACK_URL_RE.search(ack)
+    if url:
+        url_repo = f"{url.group('owner')}/{url.group('repo')}"
+        if url_repo.lower() != (current_repo or "").lower():
+            fail(
+                MODE,
+                f"live refused: ack URL repo {url_repo!r} does not match current repo {current_repo!r}",
+            )
+        return url.group("run_id")
     if ack.isdigit():
         return ack
     m = ACK_RUN_RE.search(ack)
     return m.group(1) if m else None
 
 
+def _canonical_policy_workflow_ref(entry):
+    path = entry.get("path")
+    if path != WORKFLOW_PATH:
+        return None
+    ref = entry.get("ref") or entry.get("sha")
+    if not ref:
+        return None
+    return f"{POLICY_REPO}/{path}@{ref}"
+
+
 def verify_dryrun_ack(token, repo, ack):
-    run_id = parse_ack_run_id(ack)
+    run_id = parse_ack_run_id(ack, repo)
     if not run_id:
         fail(
             MODE,
             "live refused: HYGIENE_C5_DRYRUN_ACK must be a completed dry-run run id or Actions run URL",
         )
-    run = call(f"/repos/{repo}/actions/runs/{run_id}", token=token, allow_404=True)
+    try:
+        run = call(f"/repos/{repo}/actions/runs/{run_id}", token=token, allow_404=True)
+    except HygieneAPIError as exc:
+        fail(
+            MODE,
+            f"live refused: cannot read ack run {run_id}: GitHub API {exc.code} on {exc.path}",
+        )
     if run is None:
         fail(MODE, f"live refused: dry-run ack run {run_id} not found")
     if run.get("status") != "completed":
@@ -127,11 +157,26 @@ def verify_dryrun_ack(token, repo, ack):
             MODE,
             f"live refused: dry-run ack run {run_id} conclusion is {conclusion!r}, need success",
         )
-    path = run.get("path") or ""
-    if path and path != WORKFLOW_PATH:
+    referenced = run.get("referenced_workflows") or []
+    policy_hits = []
+    for rw in referenced:
+        rw_path = rw.get("path")
+        if not rw_path:
+            fail(MODE, "live refused: referenced_workflow entry missing path")
+        if rw_path != WORKFLOW_PATH:
+            continue
+        canon = _canonical_policy_workflow_ref(rw)
+        if not canon:
+            fail(
+                MODE,
+                f"live refused: referenced workflow {rw_path!r} missing ref/sha",
+            )
+        policy_hits.append(canon)
+    if not policy_hits:
         fail(
             MODE,
-            f"live refused: ack run workflow path {path!r} is not {WORKFLOW_PATH}",
+            "live refused: ack run must reference "
+            f"{POLICY_REPO}/{WORKFLOW_PATH}@<ref> via referenced_workflows",
         )
     return run_id
 
