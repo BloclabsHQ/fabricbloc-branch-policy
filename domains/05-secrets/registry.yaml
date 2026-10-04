@@ -1,117 +1,299 @@
-# FabricBloc secrets registry (names only). Aether secrets-registry-spec §5; Sentinel review B0.
+# FabricBloc secrets registry (names only). Aether secrets-registry-spec §5.
 schema_version: 1
 policy_id: fabricbloc-secrets-registry
-calibrated_from: "2026-10-04 live GitHub inventory (names only); Aether secrets-registry-spec §5"
+calibrated_from: "2026-10-04 live GitHub inventory (names only)"
 
 entries:
   - name: ORG_GITHUB_TOKEN
-    status: live
-    onepassword_item: null
-    notes: "TODO(Cris): org-wide PAT; visibility=all."
-    github_locations:
+    type: null
+    kind: pat
+    stored_as: secret
+    github:
       - scope: org
+        repos: null
+        environment: null
         visibility: all
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: FABRICBLOC_ACTION_AUTOMATION
-    status: live
-    onepassword_item: null
-    notes: "TODO(Cris): org private secret; fabricbloc repo override for automation PAT."
-    github_locations:
+    type: null
+    kind: pat
+    stored_as: secret
+    github:
       - scope: org
+        repos: null
+        environment: null
         visibility: private
       - scope: repo
-        repo: BloclabsHQ/fabricbloc
-        overrides_org: true
+        repos:
+          - BloclabsHQ/fabricbloc
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: CURSOR_API_KEY
-    status: live
-    onepassword_item: null
-    notes: "TODO(Cris): repo Actions secret (not an environment secret)."
-    github_locations:
+    type: null
+    kind: api_key
+    stored_as: secret
+    github:
       - scope: repo
-        repo: BloclabsHQ/fabricbloc
-        kind: actions_secret
+        repos:
+          - BloclabsHQ/fabricbloc
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: SLACK_BOT_TOKEN
-    status: live
-    intentional_duplicate: true
-    duplicate_policy: N5
-    onepassword_item: null
-    notes: "TODO(Cris): intentional duplicate org + repo stores per N5."
-    github_locations:
+    type: null
+    kind: slack
+    stored_as: secret
+    github:
       - scope: org
+        repos: null
+        environment: null
         visibility: private
       - scope: repo
-        repo: BloclabsHQ/fabricbloc
+        repos:
+          - BloclabsHQ/fabricbloc
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: CLAUDE_CODE_OAUTH_TOKEN
-    status: live
-    intentional_duplicate: true
-    duplicate_policy: N5
-    onepassword_item: null
-    notes: "TODO(Cris): intentional duplicate org + repo stores per N5."
-    github_locations:
+    type: null
+    kind: oauth
+    stored_as: secret
+    github:
       - scope: org
+        repos: null
+        environment: null
         visibility: private
       - scope: repo
-        repo: BloclabsHQ/fabricbloc
+        repos:
+          - BloclabsHQ/fabricbloc
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: GHCR_READ_TOKEN
-    status: live
-    onepassword_item: null
-    notes: "TODO(Cris)."
-    github_locations:
+    type: null
+    kind: pat
+    stored_as: secret
+    github:
       - scope: org
+        repos: null
+        environment: null
         visibility: private
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: MIMIR_PUSH_TOKEN
-    status: live
-    onepassword_item: null
-    notes: "TODO(Cris): canonical entry for live MIMIR_PUSH_* family."
-    github_locations:
+    type: null
+    kind: null
+    stored_as: secret
+    github:
       - scope: org
+        repos: null
+        environment: null
         visibility: private
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: DEV_OP_SERVICE_ACCOUNT_TOKEN
-    status: live
-    onepassword_item: null
-    notes: "TODO(Cris)."
-    github_locations:
+    type: null
+    kind: op_sa
+    stored_as: secret
+    github:
       - scope: org
+        repos: null
+        environment: null
         visibility: private
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
+
+  - name: GH_READ_TOKEN
+    type: null
+    kind: pat
+    stored_as: secret
+    github:
+      - scope: repo
+        repos:
+          - BloclabsHQ/fabric-nft
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: AWS_ACCESS_KEY_ID
-    status: deprecated
-    onepassword_item: null
-    notes: "TODO(Cris): fabric-iac static key; deprecated — migrate to OIDC."
-    github_locations:
+    type: null
+    kind: null
+    stored_as: secret
+    github:
       - scope: repo
-        repo: BloclabsHQ/fabric-iac
-        kind: actions_secret
+        repos:
+          - BloclabsHQ/fabric-iac
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: deprecated(until)
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: AWS_SECRET_ACCESS_KEY
-    status: deprecated
-    onepassword_item: null
-    notes: "TODO(Cris): fabric-iac static key pair; deprecated."
-    github_locations:
+    type: null
+    kind: null
+    stored_as: secret
+    github:
       - scope: repo
-        repo: BloclabsHQ/fabric-iac
-        kind: actions_secret
+        repos:
+          - BloclabsHQ/fabric-iac
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: deprecated(until)
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: POLICY_AUDIT_APP_ID
-    status: planned
-    onepassword_item: null
-    notes: "TODO(Cris): fabricbloc-policy-audit App id as Actions variable on fabricbloc-branch-policy."
-    github_locations:
+    type: null
+    kind: app
+    stored_as: variable
+    github:
       - scope: repo
-        repo: BloclabsHQ/fabricbloc-branch-policy
-        kind: actions_variable
+        repos:
+          - BloclabsHQ/fabricbloc-branch-policy
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: planned
+    replaces: null
+    expires: null
+    replace_with: null
 
   - name: POLICY_AUDIT_APP_PRIVATE_KEY
-    status: planned
-    onepassword_item: null
-    notes: "TODO(Cris): mint names-only installation token for drift/audit workflows."
-    github_locations:
+    type: null
+    kind: app
+    stored_as: secret
+    github:
       - scope: repo
-        repo: BloclabsHQ/fabricbloc-branch-policy
-        kind: actions_secret
+        repos:
+          - BloclabsHQ/fabricbloc-branch-policy
+        environment: null
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: null
+    rotation_days: null
+    last_rotated: null
+    status: planned
+    replaces: null
+    expires: null
+    replace_with: null

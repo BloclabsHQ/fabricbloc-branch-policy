@@ -1,51 +1,61 @@
 # 05-secrets contract (Sentinel B0)
 
-Job: Canonical **names-only** catalog of FabricBloc GitHub Actions secrets/variables (Aether `secrets-registry-spec` §5). No secret values in git.
+Job: Canonical **names-only** catalog (Aether `secrets-registry-spec` **§5**). No secret values in git.
 
-IN: `registry.yaml`; vendored workflow name list; static lint rules SE-01, SE-02, SE-04, SE-05, SE-08, SE-12, SE-13.
+IN: `registry.yaml`, `SECRETS.md`, `lint_registry.py` (SE-01…SE-13 report-only).
 
-OUT: Schema-valid registry; `lint_registry.py` report (always exit 0); `validate_registry.py` fails CI on schema/contract breaks.
+OUT: Schema-valid registry (`validate_registry.py`); lint report always exit 0.
 
-GATE: Warden PR; **no** new workflow secrets, ruleset changes, or live enforcement in B0.
+GATE: Warden PR; **no** workflow secret enforcement, ruleset changes, or live drift jobs in B0.
 
-ESC: Warden → Cris (1Password `onepassword_item` links).
-
-Verify: `make validate` (`validate_registry.py` + `domains/05-secrets/tests/`).
+Verify: `make validate`.
 
 ## §5 entry fields
 
-| Field | Required | Meaning |
+| Field | Type | Notes |
 |---|---|---|
-| `name` | yes | Canonical GitHub secret or variable name (names only). |
-| `status` | yes | `live`, `deprecated`, or `planned`. |
-| `github_locations` | yes | Where the name is stored (scope + kind; never values). |
-| `onepassword_item` | yes | 1Password item id/title; `null` with `TODO(Cris)` in `notes` until linked. |
-| `notes` | yes | Human context; deprecation, N5 duplicates, override semantics. |
-| `intentional_duplicate` | no | `true` when the same name is intentionally stored in multiple scopes (N5). |
-| `duplicate_policy` | no | e.g. `N5` when `intentional_duplicate` is set. |
+| `name` | string | Canonical GitHub / runtime name (names only). |
+| `type` | string \| null | Scope/type label when known; `null` if unknown. |
+| `kind` | enum \| null | `app`, `pat`, `slack`, `oauth`, `api_key`, `op_sa`, `mac`, or `null`. |
+| `stored_as` | enum | `secret`, `variable`, or `runtime_env`. |
+| `github` | array | One object per storage location (N5 duplicates → multiple elements). |
+| `onepassword_item` | string \| null | Cris-named 1Password item; `null` = TODO. |
+| `runtime_env` | string \| null | Agent/runtime env var name when not GitHub-stored. |
+| `permissions` | string \| null | PAT access description (SE-05). |
+| `owner_role` | string \| null | |
+| `custodian` | string \| null | |
+| `rotation_days` | int \| null | |
+| `last_rotated` | ISO date string \| null | |
+| `status` | enum | `planned`, `active`, `deprecated(until)`, `removed`. |
+| `replaces` | string \| null | Prior registry name when rotating. |
+| `expires` | string \| null | PAT expiry (SE-05). |
+| `replace_with` | string \| null | Successor name (SE-05). |
 
-### `github_locations[]`
+### `github[]` object
 
-| Field | Required | Meaning |
-|---|---|---|
-| `scope` | yes | `org`, `repo`, or `environment`. |
-| `repo` | if `scope` is `repo` | `Owner/name` repository. |
-| `visibility` | if `scope` is `org` | `all` or `private`. |
-| `kind` | no (default `actions_secret`) | `actions_secret`, `actions_variable`, or `environment_secret`. |
-| `overrides_org` | no | Repo copy overrides org default (same name). |
+| Field | Type |
+|---|---|
+| `scope` | `org`, `repo`, or `environment` |
+| `repos` | string[] \| null (required for `repo` scope) |
+| `environment` | string \| null (for `environment` scope) |
+| `visibility` | `all`, `private`, or null |
 
-## Lint rules (B0)
+## Lint rules (all report-only, exit 0)
 
-| ID | B0 mode | Summary |
-|---|---|---|
-| SE-01 | static | Unique `name` per entry. |
-| SE-02 | static | Names match `^[A-Z][A-Z0-9_]+$`. |
-| SE-04 | static | `repo` scope requires `repo`; `org` requires `visibility`; repo secrets are not `environment_secret`. |
-| SE-05 | static | `status` is valid; `deprecated`/`planned` entries include non-empty `notes`. |
-| SE-06 | **stub** | Live GitHub names match registry (needs names-only audit App). |
-| SE-08 | static | Org locations declare `visibility`. |
-| SE-11 | **stub** | Undeclared cross-scope duplicates (needs names-only audit App). |
-| SE-12 | static | Vendored workflow secret names ⊆ registry names. |
-| SE-13 | static | `onepassword_item: null` ⇒ `notes` contains `TODO(Cris)`. |
+| ID | Summary |
+|---|---|
+| SE-01 | Name matches `<SCOPE>_<TYPE>[_NEXT]` or is grandfathered. |
+| SE-02 | No `GH_*` / `GITHUB_*` stored names or workflow refs; not `PAT`, `BLOC_TOKEN`, `FABRIC_TOKEN`. |
+| SE-03 | Every `secrets.*` / `vars.*` in vendored workflows resolves to a registry name. |
+| SE-04 | `_APP_ID` → variable; `_APP_PRIVATE_KEY` → secret; never store `_INSTALLATION_TOKEN`. |
+| SE-05 | Active PATs declare access (`permissions`), `expires`, and `replace_with`. |
+| SE-06 | Org visibility/repos match live GitHub (audit App stub). |
+| SE-07 | Environment-scoped names satisfy MR-11 (stub/warn). |
+| SE-08 | Public-repo secrets read-only; consumers lack `pull_request*` triggers (stub). |
+| SE-09 | Cursor `runtime_env` on manifest allow list; not matching `forbidden_patterns`. |
+| SE-10 | Rotation overdue warns at 1×, fails at 2× `rotation_days` (report severity only). |
+| SE-11 | Live names missing from registry → policy-drift issue (audit App stub). |
+| SE-12 | Registry name set equals `SECRETS.md`. |
+| SE-13 | Every `active` entry has `onepassword_item`. |
 
-`lint_registry.py` is **report-only** (always exit 0; prints rule id + names). `validate_registry.py` enforces schema and the same static checks with non-zero exit.
+**B4 note:** `GH_READ_TOKEN` (fabric-nft) is catalogued with an SE-02 finding for remediation. **`AGENT_OPS_APP_PRIVATE_KEY` must not appear** as a stored name.

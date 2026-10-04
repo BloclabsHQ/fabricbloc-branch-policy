@@ -1,22 +1,31 @@
-# Secrets registry lint rules (SE-*). B0: static checks + SE-06/SE-11 audit stubs.
+# SE-* lint rules (report-only via lint_registry.py).
 rules:
   SE-01:
-    summary: "Each catalogued name appears exactly once in registry.yaml"
+    summary: "name matches <SCOPE>_<TYPE>[_NEXT], or is grandfathered"
   SE-02:
-    summary: "Secret and variable names use SCREAMING_SNAKE_CASE"
+    summary: "no secrets.GH_*/vars.GH_*/GITHUB_*; not PAT, BLOC_TOKEN, FABRIC_TOKEN"
+  SE-03:
+    summary: "every secrets.X/vars.X in workflows resolves to a registry name"
   SE-04:
-    summary: "github_locations match scope/kind rules (repo not environment for repo Actions secrets)"
+    summary: "_APP_ID only variable; _APP_PRIVATE_KEY only secret; _INSTALLATION_TOKEN never stored"
   SE-05:
-    summary: "status is live|deprecated|planned; non-live entries document why in notes"
+    summary: "new PATs name access (permissions) and carry expires plus replace_with"
   SE-06:
-    summary: "Live GitHub org/repo secret names match registry (names-only audit App; B0 stub)"
+    summary: "org visibility/repos match live (names-only audit App)"
     b0: stub
+  SE-07:
+    summary: "env-scoped names pass MR-11"
   SE-08:
-    summary: "Org-scoped entries declare visibility all|private"
+    summary: "public-repo names read-only; consumers have no pull_request* trigger"
+    b0: stub
+  SE-09:
+    summary: "Cursor runtime_env on manifest allowed list; not forbidden_patterns (^GH_.*)"
+  SE-10:
+    summary: "rotation overdue warns at 1x rotation_days, fails at 2x"
   SE-11:
-    summary: "No undeclared duplicate names across scopes (names-only audit App; B0 stub)"
+    summary: "live names missing from registry produce policy-drift issue"
     b0: stub
   SE-12:
-    summary: "Every vendored workflow secret name is catalogued in registry.yaml"
+    summary: "registry name set equals SECRETS.md"
   SE-13:
-    summary: "Missing onepassword_item must say TODO(Cris) in notes"
+    summary: "every active entry has onepassword_item"
