@@ -167,3 +167,21 @@ def hygiene_enabled(c_var, org_var=None):
 
 
 MARKER_BOT_RE = re.compile(r"<!--\s*hygiene:([\w-]+):([^>]+)\s*-->")
+
+
+def slack_post_message(token, channel, text, thread_ts=None):
+    payload = {"channel": channel, "text": text, "unfurl_links": False, "unfurl_media": False}
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://slack.com/api/chat.postMessage",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = json.loads(resp.read().decode())
+    if not body.get("ok"):
+        raise RuntimeError(body.get("error") or "slack error")
+    return body.get("ts")

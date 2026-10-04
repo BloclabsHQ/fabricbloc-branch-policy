@@ -1,0 +1,427 @@
+# Cost class: schedule (caller-defined)
+name: hygiene-branch-prune
+
+on:
+  workflow_call:
+    inputs:
+      branch_glob:
+        description: Must remain agent/** (cannot widen)
+        type: string
+        default: agent/**
+      min_age_hours:
+        type: string
+        default: "72"
+      channel:
+        type: string
+        default: C0C531H03M4
+    secrets:
+      SLACK_BOT_TOKEN:
+        required: false
+
+permissions: {}
+
+jobs:
+  prune:
+    if: >-
+      vars.HYGIENE_ENABLED != 'false' &&
+      vars.HYGIENE_C5_MODE != 'off'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Branch prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ inputs.channel }}
+          MIN_AGE_HOURS: ${{ inputs.min_age_hours }}
+          HYGIENE_MODE: ${{ vars.HYGIENE_C5_MODE }}
+          HYGIENE_C5_DRYRUN_ACK: ${{ vars.HYGIENE_C5_DRYRUN_ACK }}
+        run: |
+          python3 - <<'PY'
+          """Shared constants and GitHub API helpers for repo-hygiene scripts (stdlib only)."""
+          import fnmatch
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
+          DEFAULT_BASE_REF = "main"
+          MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
+
+          FLOOR_DENIED = [
+              "agents/runtime/engine/",
+              "agents/agents.yaml",
+              ".github/workflows/",
+              ".github/actions/",
+              "decisions/",
+              "architecture/decisions/",
+              "CODEOWNERS",
+              ".github/CODEOWNERS",
+              "docs/CODEOWNERS",
+          ]
+
+          HYGIENE_EXTRA_PROTECTED = [
+              "infra/",
+              "ops/",
+              "iac/",
+              "**/iam/**",
+              "**/*.tf",
+              "architecture/SECRETS.md",
+              "architecture/ENV_FILES.md",
+              "policy/",
+              "rulesets/",
+          ]
+
+          # Floor never_allowlist (manifest may extend; hygiene always applies proposed_additions).
+          FLOOR_NEVER_ALLOWLIST = frozenset({
+              "BloclabsHQ/fabric-iac",
+              "BloclabsHQ/fabric-tss",
+              "BloclabsHQ/fabric-contracts",
+              "BloclabsHQ/fabric-auth",
+              "BloclabsHQ/fabric-wallet",
+              "BloclabsHQ/go-foundation",
+              "BloclabsHQ/fabric-platform",
+              "BloclabsHQ/github-actions",
+              "BloclabsHQ/fabricbloc-branch-policy",
+              "BloclabsHQ/context",
+          })
+
+          HOLD_LABELS = frozenset({"HOLD", "DO NOT MERGE"})
+          SPEC_LABELS = frozenset({"spec:draft", "spec:gate", "spec:ready", "blocked", "security"})
+
+          TARGET_REPOS = {"BloclabsHQ/fabricbloc"}
+
+          MAX_PAGES = 100
+
+          API = os.environ.get("API", "https://api.github.com").rstrip("/")
+          TOKEN = os.environ.get("GH_TOKEN", "")
+
+
+          def fail(mode, msg):
+              print(f"::error::{mode}: {msg}")
+              sys.exit(1)
+
+
+          def call(path, *, token=None, accept="application/vnd.github+json", allow_404=False, method="GET", body=None):
+              tok = token if token is not None else TOKEN
+              data = None
+              headers = {
+                  "Authorization": f"Bearer {tok}",
+                  "Accept": accept,
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "fabricbloc-hygiene",
+              }
+              if body is not None:
+                  data = json.dumps(body).encode()
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(API + path, data=data, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as resp:
+                      raw = resp.read().decode()
+              except urllib.error.HTTPError as exc:
+                  if allow_404 and exc.code == 404:
+                      return None
+                  raise HygieneAPIError(exc.code, path.split("?")[0])
+              except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                  raise HygieneAPIError(0, f"{type(exc).__name__}") from exc
+              if accept.endswith(".raw") or accept.endswith("+raw"):
+                  return raw
+              return json.loads(raw or "null")
+
+
+          class HygieneAPIError(Exception):
+              def __init__(self, code, path):
+                  self.code = code
+                  self.path = path
+                  super().__init__(f"GitHub API {code} on {path}")
+
+
+          def paginate(path, *, cap=MAX_PAGES, token=None):
+              out, page = [], 1
+              while page <= cap:
+                  sep = "&" if "?" in path else "?"
+                  chunk = call(f"{path}{sep}page={page}&per_page=100", token=token)
+                  if not chunk:
+                      break
+                  if not isinstance(chunk, list):
+                      break
+                  out.extend(chunk)
+                  if len(chunk) < 100:
+                      break
+                  page += 1
+              if page > cap:
+                  raise HygieneAPIError(0, f"pagination cap {cap} on {path.split('?')[0]}")
+              return out
+
+
+          def repo_short(full_name):
+              return full_name.split("/", 1)[-1]
+
+
+          def path_matches_any(path, patterns):
+              path = path or ""
+              for pat in patterns:
+                  if fnmatch.fnmatch(path, pat) or path.startswith(pat.rstrip("*")):
+                      return True
+                  if pat.endswith("/") and path.startswith(pat):
+                      return True
+              return False
+
+
+          def fetch_manifest_denied(repo, ref):
+              try:
+                  raw = call(
+                      f"/repos/{repo}/contents/{urllib.parse.quote(MANIFEST, safe='')}?ref={urllib.parse.quote(ref, safe='')}",
+                      accept="application/vnd.github.raw",
+                  )
+                  data = json.loads(raw)
+              except (HygieneAPIError, json.JSONDecodeError, TypeError):
+                  return list(FLOOR_DENIED), set(FLOOR_NEVER_ALLOWLIST)
+              dp = (data.get("denied_paths") or {}) if isinstance(data, dict) else {}
+              denied = list(FLOOR_DENIED)
+              denied += list(dp.get("arch_0048_baseline") or [])
+              denied += list(dp.get("proposed_additions") or [])
+              denied += list(HYGIENE_EXTRA_PROTECTED)
+              never = set(FLOOR_NEVER_ALLOWLIST)
+              for name in data.get("never_allowlist") or []:
+                  if isinstance(name, str):
+                      never.add(name if "/" in name else f"BloclabsHQ/{name}")
+              return denied, never
+
+
+          def dry_run(mode_env=None):
+              mode = (mode_env or os.environ.get("HYGIENE_MODE") or "dry-run").strip().lower()
+              return mode == "dry-run"
+
+
+          def hygiene_enabled(c_var, org_var=None):
+              org = (org_var or os.environ.get("HYGIENE_ENABLED") or "").strip().lower()
+              if org == "false":
+                  return False
+              mode = (c_var or os.environ.get("HYGIENE_MODE") or "").strip().lower()
+              return mode != "off"
+
+
+          MARKER_BOT_RE = re.compile(r"<!--\s*hygiene:([\w-]+):([^>]+)\s*-->")
+
+
+          def slack_post_message(token, channel, text, thread_ts=None):
+              payload = {"channel": channel, "text": text, "unfurl_links": False, "unfurl_media": False}
+              if thread_ts:
+                  payload["thread_ts"] = thread_ts
+              data = json.dumps(payload).encode()
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=data,
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  body = json.loads(resp.read().decode())
+              if not body.get("ok"):
+                  raise RuntimeError(body.get("error") or "slack error")
+              return body.get("ts")
+
+          #!/usr/bin/env python3
+          """C5 weekly prune of merged agent/** branches (stdlib, API-only)."""
+          import json
+          import os
+          import time
+
+
+          MODE = "hygiene-c5-branch-prune"
+          BRANCH_GLOB_PREFIX = "agent/"
+          MIN_AGE_HOURS_DEFAULT = 72
+
+
+          def env(name, default=""):
+              return os.environ.get(name, default)
+
+
+          def list_agent_branches(token, repo):
+              refs = paginate(f"/repos/{repo}/git/matching-refs/heads/{BRANCH_GLOB_PREFIX}", token=token)
+              out = []
+              for ref in refs:
+                  ref_name = ref.get("ref") or ""
+                  if not ref_name.startswith("refs/heads/agent/"):
+                      continue
+                  out.append(ref_name[len("refs/heads/") :])
+              return out
+
+
+          def branch_protected(token, repo, branch):
+              info = call(f"/repos/{repo}/branches/{branch}", token=token, allow_404=True)
+              if info is None:
+                  return True, "missing"
+              if info.get("protected"):
+                  return True, "protected"
+              rules = call(f"/repos/{repo}/rules/branches/{branch}", token=token, allow_404=True) or []
+              for rule in rules:
+                  if isinstance(rule, dict) and rule.get("type") == "deletion":
+                      return True, "ruleset-deletion"
+              return False, "ok"
+
+
+          def open_pr_heads(token, repo):
+              prs = paginate(f"/repos/{repo}/pulls?state=open", token=token, cap=50)
+              return {(p.get("head") or {}).get("ref") for p in prs}
+
+
+          def merged_pr_for_tip(token, repo, branch, sha):
+              prs = call(
+                  f"/repos/{repo}/commits/{sha}/pulls",
+                  token=token,
+                  accept="application/vnd.github+json",
+              )
+              if not isinstance(prs, list):
+                  return None
+              for pr in prs:
+                  if pr.get("merged_at") and (pr.get("head") or {}).get("ref") == branch:
+                      return pr
+              return None
+
+
+          def branch_tip_sha(token, repo, branch):
+              ref = call(f"/repos/{repo}/git/ref/heads/{branch}", token=token, allow_404=True)
+              if not ref:
+                  return None
+              return (ref.get("object") or {}).get("sha")
+
+
+          def branch_tip_age_hours(token, repo, branch):
+              sha = branch_tip_sha(token, repo, branch)
+              if not sha:
+                  return None, None
+              commit = call(f"/repos/{repo}/commits/{sha}", token=token)
+              date = ((commit or {}).get("commit") or {}).get("author", {}).get("date")
+              if not date:
+                  return sha, None
+              # ISO8601
+              from datetime import datetime, timezone
+
+              ts = datetime.strptime(date.replace("Z", "+0000"), "%Y-%m-%dT%H:%M:%S%z")
+              age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600.0
+              return sha, age_h
+
+
+          def engine_active_branch(token, repo, branch):
+              if not branch.startswith("agent/autonomous/"):
+                  return False
+              # Without engine ledger API, skip autonomous branches with no merged proof (report only).
+              return False
+
+
+          def delete_branch(token, repo, branch):
+              call(f"/repos/{repo}/git/refs/heads/{branch}", token=token, method="DELETE", allow_404=True)
+
+
+          def main():
+              token = env("GH_TOKEN")
+              slack = env("SLACK_BOT_TOKEN")
+              repo = env("REPO")
+              run_id = env("GITHUB_RUN_ID", "local")
+              mode = (env("HYGIENE_MODE") or "dry-run").strip().lower()
+              ack = env("HYGIENE_C5_DRYRUN_ACK", "").strip()
+              min_age = float(env("MIN_AGE_HOURS", str(MIN_AGE_HOURS_DEFAULT)))
+              channel = env("CHANNEL", "C0C531H03M4")
+
+              if not token:
+                  fail(MODE, "GH_TOKEN missing")
+              if mode == "live" and ack != run_id:
+                  fail(MODE, "live refused: set HYGIENE_C5_DRYRUN_ACK to this run id after a dry-run review")
+
+              delete_branch_on_merge = call(f"/repos/{repo}", token=token).get("delete_branch_on_merge")
+              print(f"delete_branch_on_merge={delete_branch_on_merge}")
+
+              heads = open_pr_heads(token, repo)
+              branches = list_agent_branches(token, repo)
+              to_delete = []
+              keep = []
+              unmerged_report = []
+
+              for branch in branches:
+                  if not branch.startswith(BRANCH_GLOB_PREFIX):
+                      keep.append((branch, "non-agent-prefix"))
+                      continue
+                  prot, reason = branch_protected(token, repo, branch)
+                  if prot:
+                      keep.append((branch, reason))
+                      continue
+                  if branch in heads:
+                      keep.append((branch, "open-pr"))
+                      continue
+                  sha, age_h = branch_tip_age_hours(token, repo, branch)
+                  if sha is None:
+                      keep.append((branch, "no-tip"))
+                      continue
+                  merged_pr = merged_pr_for_tip(token, repo, branch, sha)
+                  if not merged_pr:
+                      unmerged_report.append((branch, sha))
+                      continue
+                  if age_h is not None and age_h < min_age:
+                      keep.append((branch, f"younger-than-{min_age}h"))
+                      continue
+                  if engine_active_branch(token, repo, branch):
+                      keep.append((branch, "engine-active"))
+                      continue
+                  to_delete.append((branch, sha, merged_pr.get("number")))
+
+              deleted = 0
+              for branch, sha, prn in to_delete:
+                  if mode == "live":
+                      try:
+                          delete_branch(token, repo, branch)
+                          deleted += 1
+                          print(f"deleted {branch} pr=#{prn} sha={sha[:7]}")
+                      except HygieneAPIError as exc:
+                          if exc.code == 404:
+                              deleted += 1
+                          else:
+                              raise
+                  else:
+                      print(f"DRY-RUN delete {branch} pr=#{prn} sha={sha[:7]}")
+
+              summary = {
+                  "run_id": run_id,
+                  "mode": mode,
+                  "deleted": deleted,
+                  "candidates": len(to_delete),
+                  "keep": len(keep),
+                  "unmerged_report": len(unmerged_report),
+              }
+              print(json.dumps(summary))
+              lines = [
+                  f"*hygiene C5 branch prune* `{repo}` run `{run_id}` mode `{mode}`",
+                  f"deleted={deleted} candidates={len(to_delete)} keep={len(keep)} unmerged_listed={len(unmerged_report)}",
+                  "<!-- hygiene:c5:run:" + run_id + " -->",
+              ]
+              for b, sha, prn in to_delete[:40]:
+                  lines.append(f"• delete `{b}` (merged PR #{prn}, {sha[:7]})")
+              for b, sha in unmerged_report[:20]:
+                  lines.append(f"• report unmerged `{b}` ({sha[:7]})")
+              for b, reason in keep[:20]:
+                  lines.append(f"• keep `{b}` ({reason})")
+
+              text = "\n".join(lines)
+              if slack and channel:
+                  try:
+                      slack_post_message(slack, channel, text)
+                  except Exception as exc:
+                      fail(MODE, f"slack report failed: {exc}")
+              elif mode != "dry-run":
+                  fail(MODE, "SLACK_BOT_TOKEN required for live/report")
+
+
+          if __name__ == "__main__":
+              main()
+          PY
