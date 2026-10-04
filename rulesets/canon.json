@@ -40,13 +40,15 @@
         },
         "ref_name": {
           "include": [
-            "~DEFAULT_BRANCH"
+            "~DEFAULT_BRANCH",
+            "refs/heads/release/**",
+            "refs/heads/prod/**"
           ],
           "exclude": []
         }
       },
       "bypass_actors": [],
-      "_bypass_note": "Empty on purpose (decision F6-D2). The gates pass at once for GOV-0022 human PRs, so nobody needs a bypass. Break-glass = an org owner sets enforcement to disabled (audit-logged). An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
+      "_bypass_note": "Empty on purpose (decision F6-D2). No standing bypass on canon-agent-gates: break-glass is an org owner sets enforcement to Disabled (org audit log); fabricbloc cursor-env drift opens an issue while disabled. The gates pass at once for GOV-0022 human PRs to main, so nobody needs a bypass. An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
       "rules": [
         {
           "type": "workflows",
@@ -200,6 +202,80 @@
               }
             ]
           }
+        }
+      ]
+    },
+    {
+      "_repository": "fabricbloc",
+      "name": "canon-branch-creation-restricted",
+      "_finding": "Finding (c) layer B. Stops agents from creating a fresh ungated base branch (for example f6-gate-retarget-probe).",
+      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/*/<type>/** for each type in branch-name-guard HUMAN_RE. GitHub bypass_mode is only always|pull_request|exempt — there is no UI-only or block-API-token mode; closest is OrganizationAdmin with bypass_mode always (admin PAT/API can still bypass; humans use break-glass disable + audit log).",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "refs/heads/**"
+          ],
+          "exclude": [
+            "refs/heads/main",
+            "refs/heads/agent/**",
+            "refs/heads/*/feat/**",
+            "refs/heads/*/fix/**",
+            "refs/heads/*/chore/**",
+            "refs/heads/*/docs/**",
+            "refs/heads/*/refactor/**",
+            "refs/heads/*/test/**",
+            "refs/heads/*/ci/**",
+            "refs/heads/*/perf/**",
+            "refs/heads/*/revert/**",
+            "refs/heads/*/build/**",
+            "refs/heads/*/style/**"
+          ]
+        }
+      },
+      "bypass_actors": [
+        {
+          "actor_id": 1,
+          "actor_type": "OrganizationAdmin",
+          "bypass_mode": "always"
+        }
+      ],
+      "rules": [
+        {
+          "type": "creation"
+        }
+      ]
+    },
+    {
+      "_repository": "fabricbloc",
+      "name": "canon-deploy-branches-human-only",
+      "_finding": "Finding (c). release/** and prod/** creation and direct updates are human-only (org admin break-glass).",
+      "_comment": "Same bypass_mode limitation as canon-branch-creation-restricted; OrganizationAdmin always is the closest API option.",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "refs/heads/release/**",
+            "refs/heads/prod/**"
+          ],
+          "exclude": []
+        }
+      },
+      "bypass_actors": [
+        {
+          "actor_id": 1,
+          "actor_type": "OrganizationAdmin",
+          "bypass_mode": "always"
+        }
+      ],
+      "rules": [
+        {
+          "type": "creation"
+        },
+        {
+          "type": "update"
         }
       ]
     },

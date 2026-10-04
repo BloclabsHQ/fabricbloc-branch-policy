@@ -7,6 +7,7 @@ import json, os, re, sys, urllib.error, urllib.parse, urllib.request
 
 SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
 TARGET_REPOS = {"BloclabsHQ/fabricbloc"}
+DEFAULT_BASE_REF = "main"
 MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
 ENGINE_CONFIG = "agents/runtime/engine/config.yaml"
 # Floor: applies even if a later human PR thins the base manifest.
@@ -182,6 +183,22 @@ def ai_reviewers_from_cfg(cfg):
     return parsed
 
 
+def agent_identity_in_pr(author, author_type, author_id, commits):
+    """Agent identity from PR author or any commit (not head-ref prefix alone)."""
+    if author_type == "Bot" or is_agent(login=author, user_id=author_id):
+        return True
+    for c in commits:
+        inner = c.get("commit") or {}
+        for top, key in (("author", "author"), ("committer", "committer")):
+            node = c.get(top) or {}
+            login = node.get("login")
+            uid = node.get("id")
+            email = (inner.get(key) or {}).get("email")
+            if is_agent(login=login, email=email, user_id=uid):
+                return True
+    return False
+
+
 def gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_reviewers, reviewer_bots):
     why = []
     if head_ref.lower().startswith("agent/"):
@@ -280,6 +297,7 @@ def main():
     if event_head and event_head != head:
         fail(f"stale run: event head {event_head[:12]} != live head {head[:12]}; the newer push has its own run")
     head_ref = pr["head"]["ref"]
+    base_ref = pr["base"]["ref"]
     author = (pr.get("user") or {}).get("login") or ""
     author_type = (pr.get("user") or {}).get("type") or ""
     author_id = (pr.get("user") or {}).get("id")
@@ -293,6 +311,9 @@ def main():
     commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS)
     if len(commits) != reported_commits:
         fail(f"commit count mismatch (PR says {reported_commits}, listed {len(commits)})")
+    if agent_identity_in_pr(author, author_type, author_id, commits):
+        if base_ref != DEFAULT_BASE_REF:
+            fail("agent PRs must target main")
     applies, why = gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_rev, reviewer_bots)
     if not applies:
         print(f"{MODE}: not gated ({why[0]}); human merge authority applies.")

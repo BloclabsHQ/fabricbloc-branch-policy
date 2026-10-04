@@ -138,11 +138,12 @@ def commit(login="Madgeniusblink", email="m@example.com", sha="c" * 40,
 
 def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", author_id=None,
           files=(".github/workflows/a.yml",), commits=None, reviews=(), manifest=MANIFEST, head=HEAD,
-          changed=None, ncommits=None, renames=(), engine_config=None):
+          changed=None, ncommits=None, renames=(), engine_config=None, base_ref="main"):
     commits = [commit()] if commits is None else commits
     fl = [{"filename": f} for f in files] + [{"filename": n, "previous_filename": o} for o, n in renames]
     Fake.routes = {
-        "/repos/BloclabsHQ/fabricbloc/pulls/7": {"head": {"sha": head, "ref": ref}, "base": {"sha": BASE, "ref": "main"},
+        "/repos/BloclabsHQ/fabricbloc/pulls/7": {"head": {"sha": head, "ref": ref},
+                                                "base": {"sha": BASE, "ref": base_ref},
                                                 "user": {"login": author, "type": atype, **({"id": author_id} if author_id is not None else {})},
                                                 "changed_files": len(fl) if changed is None else changed,
                                                 "commits": len(commits) if ncommits is None else ncommits},
@@ -521,6 +522,57 @@ class T(unittest.TestCase):
         code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
         self.assertIn("ai_reviewers", out)
+
+    def test_finding_c_agent_pr_base_release_fails(self):
+        setup(files=("docs/x.md",), base_ref="release/x", **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("agent PRs must target main", out)
+
+    def test_finding_c_agent_pr_base_main_follows_normal_flow(self):
+        setup(files=("docs/x.md",), base_ref="main", **AGENT)
+        self.assertEqual(run("agent-denied-paths")[0], 0)
+
+    def test_finding_c_human_pr_base_release_not_failed_by_base_rule(self):
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",), base_ref="release/x")
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("agent PRs must target main", out)
+
+    def test_canon_agent_gates_has_no_bypass_actors(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        self.assertEqual(gates.get("bypass_actors"), [])
+
+    def test_canon_agent_gates_includes_main_release_prod(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        inc = gates["conditions"]["ref_name"]["include"]
+        self.assertIn("~DEFAULT_BRANCH", inc)
+        self.assertIn("refs/heads/release/**", inc)
+        self.assertIn("refs/heads/prod/**", inc)
+
+    def test_canon_push_protected_paths_covers_workflows(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        rs = next(r for r in canon["repository_rulesets"]
+                  if r.get("_repository") == "fabricbloc" and r["name"] == "canon-push-protected-paths")
+        paths = rs["rules"][0]["parameters"]["restricted_file_paths"]
+        self.assertIn(".github/workflows/**/*", paths)
+
+    def test_canon_branch_creation_restricted_no_tilde_all(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+
+        def strip_meta(o):
+            if isinstance(o, dict):
+                return {k: strip_meta(v) for k, v in o.items() if not k.startswith("_")}
+            if isinstance(o, list):
+                return [strip_meta(x) for x in o]
+            return o
+
+        apply_blob = json.dumps(strip_meta(canon))
+        self.assertNotIn("~ALL", apply_blob)
+        creation = next(r for r in canon["repository_rulesets"] if r["name"] == "canon-branch-creation-restricted")
+        self.assertIn("refs/heads/**", creation["conditions"]["ref_name"]["include"])
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
