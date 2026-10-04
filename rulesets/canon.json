@@ -25,16 +25,8 @@
     {
       "name": "canon-agent-gates",
       "_finding": "F6 (PR #1526) layer (a): independent enforcement boundary for agent-denied-paths and agent-review-of-record.",
-      "_apply_after": "README step 4 with conditions.ref_name.include = _bootstrap_ref_include; step 5 switches to ~DEFAULT_BRANCH after the malicious test",
-      "_bootstrap_ref_include": [
-        "refs/heads/f6-gate-test"
-      ],
-      "_post_rollout_ref_include": [
-        "~DEFAULT_BRANCH",
-        "refs/heads/main",
-        "refs/heads/release/**",
-        "refs/heads/prod/**"
-      ],
+      "_apply_after": "README apply step 5 complete (2026-10-04 PT); live org ruleset 24445414 retargeted",
+      "_live_ruleset_id": 24445414,
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -49,7 +41,10 @@
         },
         "ref_name": {
           "include": [
-            "refs/heads/f6-gate-test"
+            "~DEFAULT_BRANCH",
+            "refs/heads/main",
+            "refs/heads/release/**",
+            "refs/heads/prod/**"
           ],
           "exclude": []
         }
