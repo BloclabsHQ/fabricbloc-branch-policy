@@ -1,0 +1,25 @@
+# Cost class: event
+#
+# Runs agent-gates contract tests and canon.json OpenAPI validation on every PR.
+name: agent-gates-contract
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate canon.json and run contract tests
+        run: |
+          python3 -m pip install --disable-pip-version-check --user --require-hashes \
+            -r agent-gates/requirements-contract.txt
+          python3 agent-gates/validate_canon.py
+          python3 agent-gates/test.py
