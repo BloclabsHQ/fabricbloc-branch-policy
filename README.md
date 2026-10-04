@@ -16,7 +16,7 @@ matrix against the workflow's embedded validator.
 # F6 enforcement: gates a PR cannot rewrite
 
 **DRAFT ONLY.** Nothing here has been pushed, applied or opened as a PR, and no GitHub setting was changed. No secret values were read.
-The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (live main `e8a5985`, merge `6653e05`, public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match. `rulesets/canon.json` `pins.*` and every `workflows[].sha` match `e8a5985f5ebf7b3795716b29fb3778e9842a3e25` until the next re-pin PR.
+The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match. `rulesets/canon.json` `pins.agent_gates_sha` is `ea32ff2b6f05b1a3635a764f7823ae4c4da129f0` (squash #20); both `canon-agent-gates` workflow SHAs match it. `pins.branch_name_guard_sha` remains `e8a5985f5ebf7b3795716b29fb3778e9842a3e25` until a branch-guard re-pin.
 Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281` (pushed 7:54 PM PT, after the 1ab108f revision the review cited), its files, the 4 Codex inline comments, the 1 conversation comment, the 1 review, and the live branch-policy tree and commits.
 
 ## Files
