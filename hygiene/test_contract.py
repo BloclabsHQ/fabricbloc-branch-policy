@@ -64,10 +64,18 @@ class TestHygieneContract(unittest.TestCase):
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("branch_prune").rstrip("\n"))
 
+<<<<<<< HEAD
     def test_backlog_lint_embed_synced(self):
         body = embedded("hygiene-backlog-lint")
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("backlog_lint").rstrip("\n"))
+=======
+
+    def test_ci_red_embed_synced(self):
+        body = embedded("hygiene-ci-red")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("ci_red").rstrip("\n"))
+>>>>>>> origin/main
 
     def test_top_level_permissions_empty(self):
         for stem in HYGIENE_WORKFLOWS:
