@@ -40,6 +40,15 @@ class TestStaleExemptions(unittest.TestCase):
         os.environ["CLOSE_AFTER"] = "2020-01-01T00:00:00-07:00"
         self.assertTrue(self.mod.close_allowed())
 
+    def test_committed_event_top_level_committer(self):
+        ev = {
+            "event": "committed",
+            "sha": "a" * 40,
+            "committer": {"date": "2026-10-01T15:04:00Z", "login": "Madgeniusblink"},
+        }
+        ts = self.mod.event_timestamp(ev)
+        self.assertIsNotNone(ts)
+
 
 if __name__ == "__main__":
     unittest.main()
