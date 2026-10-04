@@ -1,0 +1,31 @@
+# SE-* lint rules (report-only via lint_registry.py).
+rules:
+  SE-01:
+    summary: "name matches <SCOPE>_<TYPE>[_NEXT], or is grandfathered"
+  SE-02:
+    summary: "no secrets.GH_*/vars.GH_*/GITHUB_*; not PAT, BLOC_TOKEN, FABRIC_TOKEN"
+  SE-03:
+    summary: "every secrets.X/vars.X in workflows resolves to a registry name"
+  SE-04:
+    summary: "_APP_ID only variable; _APP_PRIVATE_KEY only secret; _INSTALLATION_TOKEN never stored"
+  SE-05:
+    summary: "new PATs name access (permissions) and carry expires plus replace_with"
+  SE-06:
+    summary: "org visibility/repos match live (names-only audit App)"
+    b0: stub
+  SE-07:
+    summary: "env-scoped names pass MR-11"
+  SE-08:
+    summary: "public-repo names read-only; consumers have no pull_request* trigger"
+    b0: stub
+  SE-09:
+    summary: "Cursor runtime_env on manifest allowed list; not forbidden_patterns (^GH_.*)"
+  SE-10:
+    summary: "rotation overdue warns at 1x rotation_days, fails at 2x"
+  SE-11:
+    summary: "live names missing from registry produce policy-drift issue"
+    b0: stub
+  SE-12:
+    summary: "registry name set equals SECRETS.md"
+  SE-13:
+    summary: "every active entry has onepassword_item"

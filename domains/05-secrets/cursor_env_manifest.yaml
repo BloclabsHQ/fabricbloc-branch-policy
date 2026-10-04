@@ -1,0 +1,6 @@
+# SE-09: Cursor Cloud / agent runtime env names (allowed list + forbidden patterns).
+allowed:
+  - CURSOR_API_KEY
+forbidden_patterns:
+  - '^GH_.*'
+  - '^GITHUB_.*'
