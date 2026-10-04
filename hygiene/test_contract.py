@@ -64,10 +64,10 @@ class TestHygieneContract(unittest.TestCase):
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("branch_prune").rstrip("\n"))
 
-    def test_auto_merge_embed_synced(self):
-        body = embedded("hygiene-auto-merge")
+    def test_ci_red_embed_synced(self):
+        body = embedded("hygiene-ci-red")
         self.assertIsNotNone(body)
-        self.assertEqual(body.rstrip("\n"), expected_embed("auto_merge").rstrip("\n"))
+        self.assertEqual(body.rstrip("\n"), expected_embed("ci_red").rstrip("\n"))
 
     def test_top_level_permissions_empty(self):
         for stem in HYGIENE_WORKFLOWS:
@@ -105,6 +105,14 @@ class TestHygieneContract(unittest.TestCase):
         if "hygiene_sha" in pins:
             sha = pins["hygiene_sha"]
             self.assertRegex(sha, r"^[0-9a-f]{40}$")
+
+    # --- C3 auto-merge ---
+
+
+    def test_auto_merge_embed_synced(self):
+        body = embedded("hygiene-auto-merge")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("auto_merge").rstrip("\n"))
 
 
 if __name__ == "__main__":
