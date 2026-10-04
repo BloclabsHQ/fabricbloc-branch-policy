@@ -38,6 +38,7 @@ accepted=(
   "debu99/feat/identity-alignment"
   "agent/session/docs/658-branch-identity-patterns"
   "agent/autonomous/ci/fleet-branch-guard"
+  "agent/session/warden-cloud-sessions-p1-3720"
 )
 
 rejected=(
