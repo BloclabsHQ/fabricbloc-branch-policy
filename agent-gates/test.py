@@ -5,7 +5,7 @@ Extracts the embedded gate script from both workflow files (they must be
 byte-identical), then runs it against a local fake GitHub API. No network.
 Includes the F6 malicious case: an agent PR that rewrites the gate to exit 0.
 """
-import json, os, subprocess, sys, threading, unittest, urllib.parse
+import json, os, re, subprocess, sys, threading, unittest, urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -26,7 +26,10 @@ HEAD, BASE, OLD = "h" * 40, "b" * 40, "o" * 40
 
 def validate_required_gate_hosted_only(name, doc):
     """Required org workflows must use literal runs-on: ubuntu-latest on every job."""
-    for job_id, job in (doc.get("jobs") or {}).items():
+    jobs = doc.get("jobs") or {}
+    if not jobs:
+        raise AssertionError(f"{name}: jobs must not be empty")
+    for job_id, job in jobs.items():
         if "uses" in job:
             raise AssertionError(
                 f"{name} job {job_id}: reusable workflow jobs (uses:) are not allowed")
@@ -157,12 +160,59 @@ def run(mode, repo="BloclabsHQ/fabricbloc", event_head=HEAD, gh_token="test"):
     return p.returncode, p.stdout + p.stderr
 
 
-def approve(login="Madgeniusblink", sha=HEAD, state="APPROVED"):
-    return {"user": {"login": login}, "state": state, "commit_id": sha}
+def approve(login="Madgeniusblink", sha=HEAD, state="APPROVED", body=None, user_id=None):
+    user = {"login": login}
+    if user_id is not None:
+        user["id"] = user_id
+    r = {"user": user, "state": state, "commit_id": sha}
+    if body is not None:
+        r["body"] = body
+    return r
+
+
+def reviewer_body(sha=HEAD, ref="cli:probe-token-abcdef"):
+    return f"approve head {sha}\napproval-ref: {ref}"
+
+
+def load_gate_constants():
+    src = (ROOT / "agent-gates" / "embedded_gate.py").read_text()
+    ns = {}
+    exec(src.replace("\nmain()\n", "\n"), ns)  # noqa: S102
+    return ns
+
+
+def run_with_reviewer_bots(mode, bots, **kwargs):
+    import re
+    pairs = ", ".join(repr((str(b[0]), int(b[1]))) for b in bots)
+    body = embedded(mode)
+    body = re.sub(
+        r"^REVIEWER_APP_BOTS = set\(\)",
+        f"REVIEWER_APP_BOTS = {{{pairs}}}",
+        body,
+        count=1,
+        flags=re.M,
+    )
+    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN="test", REPO="BloclabsHQ/fabricbloc",
+               PR="7", EVENT_HEAD_SHA=HEAD)
+    env.update(kwargs.get("env", {}))
+    p = subprocess.run([sys.executable, "-c", body], env=env, capture_output=True, text=True, timeout=30)
+    return p.returncode, p.stdout + p.stderr
 
 
 AGENT = dict(ref="agent/autonomous/fix/x-i1-y", author="fabricbloc-agent-ops[bot]", atype="Bot",
              commits=[commit("cursoragent", "cursoragent@cursor.com")])
+
+# Bot logins and numeric user ids from unauthenticated GET /users/<login>%5Bbot%5D (2026-10-04).
+PINNED_AGENT_BOT_IDENTITIES = (
+    ("fabricbloc-agent-ops[bot]", 337168458),
+    ("fabricbloc-approval-relay[bot]", 337608266),
+    ("cursor[bot]", 206951365),
+    ("cursoragent", 199161495),
+    ("chatgpt-codex-connector[bot]", 199175422),
+    ("claude[bot]", 209825114),
+    ("github-actions[bot]", 41898282),
+    ("Copilot", 175728472),  # GET /users/copilot-pull-request-reviewer%5Bbot%5D
+)
 
 
 class T(unittest.TestCase):
@@ -179,6 +229,7 @@ class T(unittest.TestCase):
             ("label list", {"jobs": {"gate": {"runs-on": ["ubuntu-latest"], "steps": [{"run": "true"}]}}}),
             ("matrix runs-on", {"jobs": {"gate": {"runs-on": "ubuntu-latest", "strategy": {"matrix": {"runs-on": ["ubuntu-latest"]}}, "steps": [{"run": "true"}]}}}),
             ("self-hosted label", {"jobs": {"gate": {"runs-on": '["self-hosted","linux","x64"]', "steps": [{"run": "true"}]}}}),
+            ("empty jobs", {"jobs": {}}),
         )
         for label, doc in cases:
             with self.subTest(label):
@@ -355,6 +406,121 @@ class T(unittest.TestCase):
         run("agent-denied-paths")
         self.assertFalse(Path("/tmp/pwned").exists())
 
+    def test_parse_flow_list_three_unquoted(self):
+        ns = load_gate_constants()
+        cfg = "ai_reviewers: [alpha, beta, gamma]\n"
+        self.assertEqual(ns["parse_flow_list_line"](cfg, "ai_reviewers"),
+                         {"alpha", "beta", "gamma"})
+
+    def test_parse_flow_list_three_quoted(self):
+        ns = load_gate_constants()
+        cfg = "ai_reviewers: ['one', 'two', 'three']\n"
+        self.assertEqual(ns["parse_flow_list_line"](cfg, "ai_reviewers"),
+                         {"one", "two", "three"})
+
+    def test_parse_flow_list_mixed(self):
+        ns = load_gate_constants()
+        cfg = "ai_reviewers: [Madgeniusblink, 'fabricbloc-reviewer[bot]', bot2]\n"
+        self.assertEqual(ns["parse_flow_list_line"](cfg, "ai_reviewers"),
+                         {"Madgeniusblink", "fabricbloc-reviewer[bot]", "bot2"})
+
+    def test_parse_flow_list_ai_reviewers_fabricbloc_reviewer_bot(self):
+        ns = load_gate_constants()
+        cfg = "ai_reviewers: ['fabricbloc-reviewer[bot]']\n"
+        self.assertEqual(ns["parse_flow_list_line"](cfg, "ai_reviewers"),
+                         {"fabricbloc-reviewer[bot]"})
+
+    def test_reviewer_app_bots_disjoint_from_agent_identities(self):
+        ns = load_gate_constants()
+        bots = ns["REVIEWER_APP_BOTS"]
+        agent_logins = {login.lower() for login, _ in PINNED_AGENT_BOT_IDENTITIES}
+        agent_logins |= {x.lower() for x in ns["AGENT_LOGINS"]}
+        agent_ids = {uid for _, uid in PINNED_AGENT_BOT_IDENTITIES} | set(ns["AGENT_USER_IDS"])
+        for login, uid in bots:
+            self.assertNotIn(login.lower(), agent_logins)
+            self.assertNotIn(uid, agent_ids)
+        for login, uid in PINNED_AGENT_BOT_IDENTITIES:
+            self.assertNotIn((login, uid), bots)
+
+    def test_approval_relay_bot_cannot_count_as_reviewer_app(self):
+        relay = "fabricbloc-approval-relay[bot]"
+        relay_id = 337608266
+        cfg = f"human: ['Madgeniusblink', '{relay}']\n"
+        setup(files=("docs/x.md",),
+              reviews=[approve(relay, body=reviewer_body(), user_id=relay_id)],
+              engine_config=cfg, **AGENT)
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+
+    def test_reviewer_app_approval_at_head_valid_body_passes(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, body=reviewer_body(), user_id=999001)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 0, out)
+
+    def test_reviewer_app_wrong_numeric_id_fails(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, body=reviewer_body(), user_id=999002)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 1, out)
+
+    def test_reviewer_app_missing_sha_in_body_fails(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, body="approval-ref: cli:abcdef12", user_id=999001)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 1, out)
+        self.assertIn("lacks full 40-char head SHA", out)
+
+    def test_reviewer_app_missing_approval_ref_fails(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, body=HEAD, user_id=999001)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 1, out)
+        self.assertIn("approval-ref", out)
+
+    def test_reviewer_app_stale_commit_id_fails(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, sha=OLD, body=reviewer_body(OLD), user_id=999001)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 1, out)
+
+    def test_reviewer_app_never_human_skip(self):
+        ns = load_gate_constants()
+        bots = {("fabricbloc-reviewer", 999001)}
+        humans = {"Madgeniusblink", "fabricbloc-reviewer"}
+        commits = [commit("Madgeniusblink")]
+        applies, why = ns["gate_applies"](
+            "madgeniusblink/feat/x", "fabricbloc-reviewer", "User", 999001,
+            commits, humans, set(), bots)
+        self.assertTrue(applies)
+        self.assertIn("reviewer App author never qualifies for human skip", why[0])
+
+    def test_unparseable_ai_reviewers_fails_closed(self):
+        cfg = "human: ['Madgeniusblink']\nai_reviewers:\n  - bot\n"
+        setup(files=("docs/x.md",), engine_config=cfg, **AGENT)
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+        self.assertIn("ai_reviewers", out)
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

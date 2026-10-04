@@ -19,6 +19,12 @@ INCLUDE_PROPOSED = False  # flip to True (and re-pin) once FOUNDER-DECISIONS Q9 
 AGENT_USER_IDS = {199161495}
 AGENT_LOGINS = {"cursoragent"}
 AGENT_EMAILS = {"cursoragent@cursor.com", "199161495+cursoragent@users.noreply.github.com"}
+# Dedicated reviewer GitHub App (fabricbloc-reviewer). Cris fills after App creation:
+#   REVIEWER_APP_BOTS = {("fabricbloc-reviewer[bot]", <id from GET /users/fabricbloc-reviewer%5Bbot%5D>)}
+# Empty until then: no App approval can count (fail closed). Re-pin ruleset SHA after change.
+REVIEWER_APP_BOTS = set()
+APPROVAL_REF_RE = re.compile(
+    r"approval-ref:\s*(slack:\d+\.\d+|cli:[A-Za-z0-9._-]{6,64})")
 HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
 MAX_FILES = 3000   # pulls/{n}/files hard limit
 MAX_COMMITS = 250  # pulls/{n}/commits hard limit
@@ -32,6 +38,27 @@ REPO = os.environ.get("REPO", "")
 def fail(msg):
     print(f"::error::{MODE}: {msg}")
     sys.exit(1)
+
+
+def is_reviewer_app(login, user_id, bots):
+    if not login or user_id is None:
+        return False
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    return (login, uid) in bots
+
+
+def reviewer_app_body_ok(body, head):
+    text = body or ""
+    if head not in text:
+        return False, f"review body lacks full 40-char head SHA {head}"
+    if not APPROVAL_REF_RE.search(text):
+        return False, (
+            "review body lacks approval-ref matching "
+            "approval-ref: (slack:<ts>|cli:<token>)")
+    return True, None
 
 
 def call(path, accept="application/vnd.github+json", allow_404=False):
@@ -82,16 +109,80 @@ def is_agent(login=None, email=None, user_id=None):
     return e in AGENT_EMAILS or e.endswith("[bot]@users.noreply.github.com")
 
 
-def ai_reviewers_from_cfg(cfg):
+def _parse_flow_list_items(inner):
+    """Split flow-list inner text into items (unquoted, single- or double-quoted)."""
+    items = []
+    i, n = 0, len(inner)
+
+    def skip_sep():
+        nonlocal i
+        while i < n and inner[i] in " \t\n\r,":
+            i += 1
+
+    while True:
+        skip_sep()
+        if i >= n:
+            break
+        if inner[i] == "'":
+            i += 1
+            start = i
+            while i < n and inner[i] != "'":
+                i += 1
+            if i >= n:
+                return None
+            items.append(inner[start:i])
+            i += 1
+        elif inner[i] == '"':
+            i += 1
+            start = i
+            while i < n and inner[i] != '"':
+                i += 1
+            if i >= n:
+                return None
+            items.append(inner[start:i])
+            i += 1
+        else:
+            start = i
+            while i < n and inner[i] != ",":
+                i += 1
+            token = inner[start:i].strip()
+            if not token:
+                return None
+            items.append(token)
+    skip_sep()
+    if i < n:
+        return None
+    return items
+
+
+def parse_flow_list_line(cfg, key):
+    """Parse a one-line YAML flow list like [a, 'b[bot]'] (quoted strings may contain ])."""
     if not cfg:
-        return set()
-    m = re.search(r"^\s*ai_reviewers:\s*\[([^\]]*)\]", cfg, re.M)
+        return None
+    if not re.search(rf"^\s*{key}:", cfg, re.M):
+        return None
+    m = re.search(rf"^\s*{key}:\s*\[(.*)\]\s*$", cfg, re.M)
     if not m:
+        return False
+    parsed = _parse_flow_list_items(m.group(1))
+    if parsed is None:
+        return False
+    out = {s.strip() for s in parsed if s.strip()}
+    return out
+
+
+def ai_reviewers_from_cfg(cfg):
+    parsed = parse_flow_list_line(cfg, "ai_reviewers")
+    if parsed is None:
         return set()
-    return {x.strip().strip("'\"") for x in m.group(1).split(",") if x.strip()}
+    if parsed is False:
+        fail(
+            "base config.yaml has ai_reviewers: but it is not a one-line flow list "
+            "[a, b]; failing closed")
+    return parsed
 
 
-def gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_reviewers):
+def gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_reviewers, reviewer_bots):
     why = []
     if head_ref.lower().startswith("agent/"):
         why.append("agent/** head ref")
@@ -108,6 +199,8 @@ def gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_r
                 why.append(f"agent commit identity {login or email} on {c.get('sha', '')[:12]}")
     if why:
         return True, why
+    if is_reviewer_app(author, author_id, reviewer_bots):
+        return True, ["reviewer App author never qualifies for human skip"]
     m = HUMAN_RE.match(head_ref)
     if (author in humans and author not in ai_reviewers
             and m and m.group(1) == author.lower()):
@@ -147,6 +240,26 @@ def participants(commits, allow, author):
     return out
 
 
+def approval_qualifies(review, head, allow, excluded, reviewer_bots):
+    login = (review.get("user") or {}).get("login")
+    uid = (review.get("user") or {}).get("id")
+    if not login or review.get("state") != "APPROVED":
+        return False
+    if review.get("commit_id") != head:
+        return False
+    if login not in allow or login in excluded:
+        return False
+    if not is_agent(login=login):
+        return True
+    if is_reviewer_app(login, uid, reviewer_bots):
+        ok, reason = reviewer_app_body_ok(review.get("body") or "", head)
+        if not ok:
+            print(f"{MODE}: rejecting reviewer App approval from {login}: {reason}")
+            return False
+        return True
+    return False
+
+
 def main():
     if MODE not in ("agent-denied-paths", "agent-review-of-record"):
         fail(f"unknown MODE {MODE!r}")
@@ -157,6 +270,7 @@ def main():
         return
     if REPO not in TARGET_REPOS:
         fail(f"{REPO} is not onboarded in this pinned gate (TARGET_REPOS); add it and re-pin")
+    reviewer_bots = REVIEWER_APP_BOTS
     number = os.environ.get("PR", "")
     if not number.isdigit():
         fail("no pull request number in the event (only pull_request events are supported)")
@@ -179,7 +293,7 @@ def main():
     commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS)
     if len(commits) != reported_commits:
         fail(f"commit count mismatch (PR says {reported_commits}, listed {len(commits)})")
-    applies, why = gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_rev)
+    applies, why = gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_rev, reviewer_bots)
     if not applies:
         print(f"{MODE}: not gated ({why[0]}); human merge authority applies.")
         return
@@ -219,9 +333,9 @@ def main():
     allow = set(humans)
     if cfg:
         for key in ("human", "ai_reviewers"):
-            m = re.search(rf"^\s*{key}:\s*\[([^\]]*)\]", cfg, re.M)
-            if m:
-                allow |= {x.strip().strip("'\"") for x in m.group(1).split(",") if x.strip()}
+            parsed = parse_flow_list_line(cfg, key)
+            if parsed not in (None, False):
+                allow |= parsed
     if not allow:
         fail("no reviewer allowlist at base (manifest operators.members_expected)")
     excluded = participants(commits, allow, author)
@@ -235,8 +349,7 @@ def main():
     if blocked:
         fail(f"open CHANGES_REQUESTED from {blocked}")
     ok = sorted(l for l, r in latest.items()
-                if r["state"] == "APPROVED" and r.get("commit_id") == head
-                and l in allow and l not in excluded and not is_agent(login=l))
+                if approval_qualifies(r, head, allow, excluded, reviewer_bots))
     if not ok:
         fail(f"no allowlisted, independent APPROVE at head {head[:12]}; a new push needs a new review, then re-run this check")
     print(f"{MODE}: approved at {head[:12]} by {ok}")
