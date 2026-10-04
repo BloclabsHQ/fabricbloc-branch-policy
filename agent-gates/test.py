@@ -210,8 +210,11 @@ def load_canon():
     return json.loads((ROOT / "rulesets" / "canon.json").read_text())
 
 
-def creation_restricted(canon):
-    return next(r for r in canon["repository_rulesets"] if r["name"] == "canon-branch-creation-restricted")
+def creation_restricted(canon, repository="fabricbloc"):
+    return next(
+        r for r in canon["repository_rulesets"]
+        if r["name"] == "canon-branch-creation-restricted" and r.get("_repository") == repository
+    )
 
 
 def deploy_human_only(canon):
@@ -231,8 +234,8 @@ def exclude_would_cover_all_branches(pattern):
     return p in CREATION_RESTRICTED_FORBIDDEN_EXCLUDES
 
 
-def assert_creation_restricted_shape(canon):
-    rs = creation_restricted(canon)
+def assert_creation_restricted_shape(canon, repository="fabricbloc", extra_required_excludes=()):
+    rs = creation_restricted(canon, repository=repository)
     assert rs.get("bypass_actors") == [], "creation-restricted bypass must be empty"
     assert rs.get("enforcement") == "active"
     inc = rs["conditions"]["ref_name"]["include"]
@@ -248,6 +251,8 @@ def assert_creation_restricted_shape(canon):
     for handle in ns["GOV_HUMAN_HANDLES"]:
         for typ in ns["HUMAN_BRANCH_TYPES"]:
             assert f"refs/heads/{handle}/{typ}/**" in exc
+    for path in extra_required_excludes:
+        assert path in exc, f"missing required exclude {path} for {repository}"
 
 
 def assert_deploy_human_only_shape(canon):
@@ -1011,6 +1016,20 @@ class T(unittest.TestCase):
                   if r.get("_repository") == "fabricbloc" and r["name"] == "canon-push-protected-paths")
         paths = rs["rules"][0]["parameters"]["restricted_file_paths"]
         self.assertIn(".github/workflows/**/*", paths)
+
+    def test_context_creation_restricted_shape(self):
+        assert_creation_restricted_shape(load_canon(), repository="context")
+
+    def test_keyflo_creation_restricted_shape(self):
+        assert_creation_restricted_shape(
+            load_canon(),
+            repository="keyflo-session-issuer",
+            extra_required_excludes=("refs/heads/dev",),
+        )
+
+    def test_creation_restricted_target_repos_no_bypass(self):
+        for repo in ("fabricbloc", "context", "keyflo-session-issuer"):
+            self.assertEqual(creation_restricted(load_canon(), repository=repo).get("bypass_actors"), [])
 
     def test_canon_branch_creation_restricted_no_tilde_all(self):
         canon = load_canon()

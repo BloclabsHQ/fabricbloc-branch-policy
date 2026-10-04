@@ -23,6 +23,8 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 | `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8e6a8e` | none |
 | `main-required-ci` | fabricbloc `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR with 0 approvals and squash only, 9 contexts pinned to Actions 15368 | OrganizationAdmin (`pull_request`) |
 | `canon-branch-creation-restricted` (finding c B) | fabricbloc `refs/heads/**` minus main, `agent/**`, explicit GOV-0022 handle paths (`dependabot/**` blocked until configured); excludes must not cover all branches (`refs/heads/**`, `~ALL`, etc.) | Blocks branch **creation** for non-exempt names | none (disable ruleset) |
+| `canon-branch-creation-restricted` | context — same exempt set as fabricbloc (default **main**) | Blocks branch **creation** outside main, `agent/**`, and GOV-0022 handle paths | none (disable ruleset) |
+| `canon-branch-creation-restricted` | keyflo-session-issuer — fabricbloc set plus **`dev`** (repo default) | Blocks branch **creation** outside dev, main, `agent/**`, and handle paths | none (disable ruleset) |
 | `canon-deploy-branches-human-only` (finding c) | fabricbloc `release/**`, `prod/**` | Blocks **creation** and **update** | none (disable ruleset) |
 | `canon-agent-branches` | fabricbloc `agent/**` | No force-push | none |
 | `canon-provider-branches-blocked` (Q12) | fabricbloc `cursor/**` `codex/**` `claude/**` `qwen/**` | Creation blocked | none |
