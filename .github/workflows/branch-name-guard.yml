@@ -39,7 +39,7 @@ jobs:
 
           # agent/<session|autonomous>/<type>/<scope>-<slug> — agent-touched work.
           # The final segment requires both a scope and a slug.
-          AGENT_RE='^(agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+|agent/session/warden-[a-z0-9]+(-[a-z0-9]+)*)$'
+          AGENT_RE='^agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+$'
           # <github-handle>/<type>/<slug> — direct human work. The actor segment
           # follows GitHub's handle length and leading/trailing character shape.
           HUMAN_RE='^[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$'
