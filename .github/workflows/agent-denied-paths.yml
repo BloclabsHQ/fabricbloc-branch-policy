@@ -11,7 +11,8 @@
 # Scope is default-deny: the gate applies unless the PR is a GOV-0022 human
 # branch (<handle>/<type>/<slug>, handle == PR author) opened by an allowlisted
 # human with no agent commit identities. agent/**, bot authors and Cursor
-# commit identities (cursoragent / cursor[bot]) are always gated.
+# commit identities (login cursoragent, any *[bot], user id 199161495, or the
+# pinned Cursor emails on author or committer) are always gated.
 #
 # The denied list is the pinned FLOOR_DENIED plus the BASE commit's manifest,
 # read via the contents API at pull_request.base.sha. The changed-file list is
@@ -52,9 +53,9 @@ jobs:
         run: |
           python3 - <<'PY'
           # F6 agent gate. Canonical copy is embedded, byte-identical, in
-          # agent-denied-paths.yml and agent-review-of-record.yml (agent-gates/test.py
-          # enforces that). It never checks out or executes pull-request code: every
-          # input is the event payload plus GitHub REST reads of the PR and of the BASE
+          # agent-denied-paths.yml and agent-review-of-record.yml (agent-gates/sync_embedded_gate.py
+          # and agent-gates/test.py enforce that). It never checks out or executes pull-request code:
+          # every input is the event payload plus GitHub REST reads of the PR and of the BASE
           # commit. Python stdlib only. Any API error or ambiguity fails closed.
           import json, os, re, sys, urllib.error, urllib.parse, urllib.request
 
@@ -69,8 +70,9 @@ jobs:
               "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS",
           ]
           INCLUDE_PROPOSED = False  # flip to True (and re-pin) once FOUNDER-DECISIONS Q9 = yes
-          AGENT_LOGINS = {"cursoragent", "cursor[bot]", "fabricbloc-agent-ops[bot]"}
-          AGENT_EMAILS = {"cursoragent@cursor.com"}
+          AGENT_USER_IDS = {199161495}
+          AGENT_LOGINS = {"cursoragent"}
+          AGENT_EMAILS = {"cursoragent@cursor.com", "199161495+cursoragent@users.noreply.github.com"}
           HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
           MAX_FILES = 3000   # pulls/{n}/files hard limit
           MAX_COMMITS = 250  # pulls/{n}/commits hard limit
@@ -120,30 +122,47 @@ jobs:
               return call(f"/repos/{REPO}/contents/{q}?ref={sha}", "application/vnd.github.raw", allow_404=True)
 
 
-          def is_agent(login=None, email=None):
+          def is_agent(login=None, email=None, user_id=None):
+              try:
+                  if user_id is not None and int(user_id) in AGENT_USER_IDS:
+                      return True
+              except (TypeError, ValueError):
+                  pass
               if login and (login in AGENT_LOGINS or login.lower().endswith("[bot]")):
                   return True
               e = (email or "").lower()
               return e in AGENT_EMAILS or e.endswith("[bot]@users.noreply.github.com")
 
 
-          def gate_applies(head_ref, author, author_type, commits, humans):
+          def ai_reviewers_from_cfg(cfg):
+              if not cfg:
+                  return set()
+              m = re.search(r"^\s*ai_reviewers:\s*\[([^\]]*)\]", cfg, re.M)
+              if not m:
+                  return set()
+              return {x.strip().strip("'\"") for x in m.group(1).split(",") if x.strip()}
+
+
+          def gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_reviewers):
               why = []
               if head_ref.lower().startswith("agent/"):
                   why.append("agent/** head ref")
-              if author_type == "Bot" or is_agent(author):
+              if author_type == "Bot" or is_agent(login=author, user_id=author_id):
                   why.append(f"agent PR author {author}")
               for c in commits:
                   inner = c.get("commit") or {}
                   for top, key in (("author", "author"), ("committer", "committer")):
-                      login = (c.get(top) or {}).get("login")
+                      node = c.get(top) or {}
+                      login = node.get("login")
+                      uid = node.get("id")
                       email = (inner.get(key) or {}).get("email")
-                      if is_agent(login, email):
+                      if is_agent(login=login, email=email, user_id=uid):
                           why.append(f"agent commit identity {login or email} on {c.get('sha', '')[:12]}")
               if why:
                   return True, why
               m = HUMAN_RE.match(head_ref)
-              if author in humans and m and m.group(1) == author.lower():
+              if (author in humans and author not in ai_reviewers
+                      and m and m.group(1) == author.lower()):
                   return False, ["GOV-0022 human ref owned by an allowlisted human author, no agent commits"]
               return True, ["default deny: not a recognised human PR"]
 
@@ -183,6 +202,8 @@ jobs:
           def main():
               if MODE not in ("agent-denied-paths", "agent-review-of-record"):
                   fail(f"unknown MODE {MODE!r}")
+              if not TOKEN.strip():
+                  fail("GH_TOKEN is empty; cannot call the GitHub API")
               if REPO == SELF_REPO:
                   print(f"{MODE}: running in the policy repo itself; nothing to gate.")
                   return
@@ -199,15 +220,18 @@ jobs:
               head_ref = pr["head"]["ref"]
               author = (pr.get("user") or {}).get("login") or ""
               author_type = (pr.get("user") or {}).get("type") or ""
+              author_id = (pr.get("user") or {}).get("id")
               manifest = manifest_at(base_sha)
               humans = set((manifest.get("operators") or {}).get("members_expected") or [])
+              cfg = base_text(ENGINE_CONFIG, base_sha)
+              ai_rev = ai_reviewers_from_cfg(cfg)
               reported_commits = int(pr.get("commits") or 0)
               if reported_commits >= MAX_COMMITS:
                   fail(f"PR has {reported_commits} commits (API cap {MAX_COMMITS}); cannot see them all")
               commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS)
               if len(commits) != reported_commits:
                   fail(f"commit count mismatch (PR says {reported_commits}, listed {len(commits)})")
-              applies, why = gate_applies(head_ref, author, author_type, commits, humans)
+              applies, why = gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_rev)
               if not applies:
                   print(f"{MODE}: not gated ({why[0]}); human merge authority applies.")
                   return
@@ -243,9 +267,8 @@ jobs:
                   print(f"{MODE}: {len(paths)} path(s), none denied.")
                   return
 
-              # agent-review-of-record
+              # agent-review-of-record: ai_reviewers may approve; they never qualify for human skip.
               allow = set(humans)
-              cfg = base_text(ENGINE_CONFIG, base_sha)
               if cfg:
                   for key in ("human", "ai_reviewers"):
                       m = re.search(rf"^\s*{key}:\s*\[([^\]]*)\]", cfg, re.M)
@@ -253,7 +276,7 @@ jobs:
                           allow |= {x.strip().strip("'\"") for x in m.group(1).split(",") if x.strip()}
               if not allow:
                   fail("no reviewer allowlist at base (manifest operators.members_expected)")
-              excluded = participants(commits, allow, author)
+              excluded = participants(commits, humans, author)
               reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
               latest = {}
               for r in reviews:
@@ -265,7 +288,7 @@ jobs:
                   fail(f"open CHANGES_REQUESTED from {blocked}")
               ok = sorted(l for l, r in latest.items()
                           if r["state"] == "APPROVED" and r.get("commit_id") == head
-                          and l in allow and l not in excluded and not is_agent(l))
+                          and l in allow and l not in excluded and not is_agent(login=l))
               if not ok:
                   fail(f"no allowlisted, independent APPROVE at head {head[:12]}; a new push needs a new review, then re-run this check")
               print(f"{MODE}: approved at {head[:12]} by {ok}")

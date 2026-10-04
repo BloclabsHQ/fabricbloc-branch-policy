@@ -62,29 +62,52 @@ threading.Thread(target=SRV.serve_forever, daemon=True).start()
 API = f"http://127.0.0.1:{SRV.server_port}"
 
 
-def commit(login="Madgeniusblink", email="m@example.com", sha="c" * 40):
-    return {"sha": sha, "author": {"login": login} if login else None, "committer": {"login": login} if login else None,
-            "commit": {"author": {"name": login or "x", "email": email}, "committer": {"name": login or "x", "email": email}}}
+def commit(login="Madgeniusblink", email="m@example.com", sha="c" * 40,
+           author_login=None, committer_login=None, author_id=None, committer_id=None,
+           author_email=None, committer_email=None):
+    al = author_login if author_login is not None else login
+    cl = committer_login if committer_login is not None else login
+    ae = author_email if author_email is not None else email
+    ce = committer_email if committer_email is not None else email
+    author = None
+    if al or author_id is not None:
+        author = {}
+        if al:
+            author["login"] = al
+        if author_id is not None:
+            author["id"] = author_id
+    committer = None
+    if cl or committer_id is not None:
+        committer = {}
+        if cl:
+            committer["login"] = cl
+        if committer_id is not None:
+            committer["id"] = committer_id
+    return {"sha": sha, "author": author, "committer": committer,
+            "commit": {"author": {"name": al or "x", "email": ae},
+                       "committer": {"name": cl or "x", "email": ce}}}
 
 
-def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", files=(".github/workflows/a.yml",),
-          commits=None, reviews=(), manifest=MANIFEST, head=HEAD, changed=None, ncommits=None, renames=()):
+def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", author_id=None,
+          files=(".github/workflows/a.yml",), commits=None, reviews=(), manifest=MANIFEST, head=HEAD,
+          changed=None, ncommits=None, renames=(), engine_config=None):
     commits = [commit()] if commits is None else commits
     fl = [{"filename": f} for f in files] + [{"filename": n, "previous_filename": o} for o, n in renames]
     Fake.routes = {
         "/repos/BloclabsHQ/fabricbloc/pulls/7": {"head": {"sha": head, "ref": ref}, "base": {"sha": BASE, "ref": "main"},
-                                                "user": {"login": author, "type": atype},
+                                                "user": {"login": author, "type": atype, **({"id": author_id} if author_id is not None else {})},
                                                 "changed_files": len(fl) if changed is None else changed,
                                                 "commits": len(commits) if ncommits is None else ncommits},
         "/repos/BloclabsHQ/fabricbloc/pulls/7/files": fl,
         "/repos/BloclabsHQ/fabricbloc/pulls/7/commits": commits,
         "/repos/BloclabsHQ/fabricbloc/pulls/7/reviews": list(reviews),
         "manifest": json.dumps(manifest) if manifest is not None else None,
+        **({"config": engine_config} if engine_config is not None else {}),
     }
 
 
-def run(mode, repo="BloclabsHQ/fabricbloc", event_head=HEAD):
-    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN="test", REPO=repo, PR="7", EVENT_HEAD_SHA=event_head)
+def run(mode, repo="BloclabsHQ/fabricbloc", event_head=HEAD, gh_token="test"):
+    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN=gh_token, REPO=repo, PR="7", EVENT_HEAD_SHA=event_head)
     p = subprocess.run([sys.executable, "-c", embedded(mode)], env=env, capture_output=True, text=True, timeout=30)
     return p.returncode, p.stdout + p.stderr
 
@@ -125,6 +148,40 @@ class T(unittest.TestCase):
     def test_unlinked_cursor_email_is_gated(self):
         setup(commits=[commit(None, "cursoragent@cursor.com")])
         self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_K7c_noreply_email_only_no_login(self):
+        setup(commits=[commit(None, "199161495+cursoragent@users.noreply.github.com")])
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_K7d_cursor_user_id_other_login(self):
+        setup(commits=[commit("notcursoragent", "other@example.com", author_id=199161495)])
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_agent_email_case_insensitive(self):
+        setup(commits=[commit(None, "CursorAgent@Cursor.COM")])
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+        setup(commits=[commit(None, "199161495+CursorAgent@users.noreply.github.com")])
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_empty_gh_token_fails(self):
+        setup(files=("docs/x.md",), **AGENT)
+        code, out = run("agent-denied-paths", gh_token="")
+        self.assertEqual(code, 1, out)
+        self.assertIn("GH_TOKEN is empty", out)
+
+    def test_ai_reviewer_approval_counts(self):
+        cfg = "human: ['Madgeniusblink']\nai_reviewers: ['fabricbloc-ai-reviewer']\n"
+        setup(files=("docs/x.md",), reviews=[approve("fabricbloc-ai-reviewer")],
+              engine_config=cfg, **AGENT)
+        self.assertEqual(run("agent-review-of-record")[0], 0)
+
+    def test_ai_reviewer_on_handle_branch_not_human_skip(self):
+        cfg = "human: ['Madgeniusblink']\nai_reviewers: ['fabricbloc-ai-reviewer']\n"
+        setup(ref="madgeniusblink/feat/x", author="fabricbloc-ai-reviewer", atype="User",
+              files=("docs/x.md",), engine_config=cfg)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("gated because", out)
 
     def test_handle_must_match_author(self):
         setup(ref="someoneelse/feat/x")

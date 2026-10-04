@@ -27,7 +27,8 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 | `rulesets/README.md` | File format and apply rules |
 | `.github/workflows/agent-denied-paths.yml` | Pinned gate. Reads the changed files via `GET /pulls/{n}/files` and the denied list from the **base** commit via the contents API. No checkout, no PR code. |
 | `.github/workflows/agent-review-of-record.yml` | Pinned gate. Requires an independent, allowlisted APPROVE at the exact live head. API only. |
-| `agent-gates/test.py` | 27 contract tests against a local fake API, including the F6 case (agent PR edits the gate to `exit 0` → still fails). All pass. Also checks that both workflows embed byte-identical logic and that neither has a checkout. |
+| `agent-gates/test.py` | Contract tests against a local fake API (including K7c/K7d Cursor identity cases and ai_reviewer rules), the F6 case (agent PR edits the gate to `exit 0` → still fails), byte-identical embedded gate logic, and no checkout. |
+| `agent-gates/embedded_gate.py` | Canonical gate script; `sync_embedded_gate.py` copies it into both workflow heredocs. |
 | `agent-gates/validate_canon.py` | Validates `canon.json` bodies against the GitHub OpenAPI description |
 | `fabricbloc-side/.github/workflows/agent-review-rerun.yml` | Optional helper for fabricbloc: re-runs the pinned review check after a review. Convenience only; it can't make the check pass. |
 | `fabricbloc-side/CHANGES.md` | Required edits to PR #1526, including 2 bugs found in its newest head |
@@ -103,7 +104,7 @@ All against base `f6-gate-test` (step 5). Then repeat M1 once against `main` aft
 | M4 | Agent head, docs-only | denied-paths green, review red. Cris approves, then re-run (or the helper re-runs it): green. Push one more commit: red again. |
 | M5 | Cris's own human PR touching `.github/workflows/` | Both green ("not gated"). This is the no-lockout check. |
 
-`python3 agent-gates/test.py` encodes the same logic offline (27 cases).
+`python3 agent-gates/test.py` encodes the same logic offline. Review allowlist includes `ai_reviewers`; they never qualify for the human attended-skip on GOV-0022 handle branches.
 
 **Q14 identity test (before applying Q14 to main):** apply `canon-push-protected-paths` and have an attended Cursor agent push a one-line workflow edit to a scratch `agent/session/test/q14-probe-x` branch. **Rejected** means Cursor pushes as the App: keep Q14. **Accepted** means it pushed with an admin user token: set Q14 aside (it does nothing against Cursor) and rely on (a). Raise T7 with Cursor or move work to a service account.
 
