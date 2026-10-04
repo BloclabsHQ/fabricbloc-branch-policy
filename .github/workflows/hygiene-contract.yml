@@ -1,0 +1,26 @@
+# Cost class: event
+#
+# Hygiene contract: embed byte-identity, unit tests, permissions lint.
+name: hygiene-contract
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Verify hygiene embed sync
+        run: |
+          python3 hygiene/sync_embedded_hygiene.py
+          git diff --exit-code .github/workflows/hygiene-*.yml
+      - name: Hygiene unit tests
+        run: |
+          python3 -m unittest discover -s hygiene -p 'test_*.py' -v
