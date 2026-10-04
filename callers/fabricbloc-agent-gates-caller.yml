@@ -1,0 +1,18 @@
+# Copy to BloclabsHQ/fabricbloc/.github/workflows/agent-gates-caller.yml
+# Replace POLICY_SHA with fabricbloc-branch-policy merge SHA (40 chars).
+# DRAFT fallback — unverified whether Team org rulesets support required-workflows.
+name: agent-gates-caller
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  agent-denied-paths:
+    uses: BloclabsHQ/fabricbloc-branch-policy/.github/workflows/agent-denied-paths.yml@POLICY_SHA
+  agent-review-of-record:
+    uses: BloclabsHQ/fabricbloc-branch-policy/.github/workflows/agent-review-of-record.yml@POLICY_SHA

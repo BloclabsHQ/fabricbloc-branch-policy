@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "DRAFT — NOT APPLIED. Team-plan fallback push ruleset body for fabricbloc.",
+    "Blocks non-admin pushes touching agent control paths (workflows, .cursor, full .claude tree).",
+    "OrganizationAdmin bypass remains break-glass only. JSON only; Warden does not apply via API."
+  ],
+  "_repository": "fabricbloc",
+  "name": "fallback-push-agent-control-paths",
+  "target": "push",
+  "enforcement": "active",
+  "bypass_actors": [
+    {
+      "actor_id": 1,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    }
+  ],
+  "rules": [
+    {
+      "type": "file_path_restriction",
+      "parameters": {
+        "restricted_file_paths": [
+          ".github/workflows/**/*",
+          ".github/actions/**/*",
+          ".github/CODEOWNERS",
+          "CODEOWNERS",
+          "docs/CODEOWNERS",
+          ".cursor/**/*",
+          ".claude/**/*",
+          ".gitmodules",
+          "agents/runtime/engine/**/*",
+          "agents/agents.yaml"
+        ]
+      }
+    }
+  ]
+}
