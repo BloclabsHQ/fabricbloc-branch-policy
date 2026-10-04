@@ -14,3 +14,5 @@ One row per enforced rule. Consumers pin this repo at a release SHA and cite IDs
 | CU-08 | 04-cursor | Agent/harness tickets: label → MadAgentPM → Loom | Process routing | domains/04-cursor/tests/test_cloud_sessions.py |
 | CU-09 | 04-cursor | Loom never reviews its own PRs | Review-of-record + routing | domains/04-cursor/tests/test_cloud_sessions.py |
 | CU-10 | 04-cursor | Phase-in: new sessions only; grandfather MadEngineer in-flight + `agent/autonomous/**` | Harness | domains/04-cursor/tests/test_cloud_sessions.py |
+| AG-04 | 03-agent-gates | Deny agent PR edits under `.github/workflows/**`, `.cursor/**`, `.claude/**` | Pinned `agent-denied-paths` | agent-gates/test.py |
+| AG-05 | 03-agent-gates | Projection must be URL or pinned SHA/release asset, not parent checkout/submodule | Pinned `agent-denied-paths` (`PROJECTION_ENFORCE`) | agent-gates/test.py |
