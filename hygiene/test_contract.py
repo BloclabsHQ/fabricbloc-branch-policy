@@ -69,6 +69,14 @@ class TestHygieneContract(unittest.TestCase):
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("ci_red").rstrip("\n"))
 
+    # --- C2 stale ---
+
+
+    def test_stale_embed_synced(self):
+        body = embedded("hygiene-stale")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("stale").rstrip("\n"))
+
     def test_top_level_permissions_empty(self):
         for stem in HYGIENE_WORKFLOWS:
             path = WF / f"{stem}.yml"
@@ -96,6 +104,14 @@ class TestHygieneContract(unittest.TestCase):
         if isinstance(needs, str):
             needs = [needs]
         self.assertEqual(needs, ["plan"])
+
+    # --- C6 backlog-lint ---
+
+
+    def test_backlog_lint_embed_synced(self):
+        body = embedded("hygiene-backlog-lint")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("backlog_lint").rstrip("\n"))
 
     def test_canon_hygiene_sha_when_present(self):
         import json
