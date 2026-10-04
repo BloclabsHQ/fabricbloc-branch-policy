@@ -30,11 +30,9 @@ permissions:
 
 jobs:
   agent-review-of-record:
-    # The policy repo is public and the org fleet refuses public repos, so its
-    # own PRs use a hosted runner. In BloclabsHQ/fabricbloc (private) the job
-    # follows the fleet switch. TODO-VERIFY: whether target-repo `vars` resolve
-    # for a ruleset-required workflow; if not, this falls back to ubuntu-latest.
-    runs-on: ${{ github.repository == 'BloclabsHQ/fabricbloc-branch-policy' && 'ubuntu-latest' || (vars.FLEET_ENABLED == 'true' && fromJSON('["self-hosted","linux","x64"]') || 'ubuntu-latest') }}
+    # Org-required (canon-agent-gates): must run on ephemeral GitHub-hosted runners
+    # only. Self-hosted fleet runners are shared with PR-head jobs and could fake a pass.
+    runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
       # Deliberately NO actions/checkout: nothing from the PR (or the target

@@ -27,7 +27,7 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 | `rulesets/README.md` | File format and apply rules |
 | `.github/workflows/agent-denied-paths.yml` | Pinned gate. Reads the changed files via `GET /pulls/{n}/files` and the denied list from the **base** commit via the contents API. No checkout, no PR code. |
 | `.github/workflows/agent-review-of-record.yml` | Pinned gate. Requires an independent, allowlisted APPROVE at the exact live head. API only. |
-| `agent-gates/test.py` | Contract tests against a local fake API (including K7c/K7d Cursor identity cases and ai_reviewer rules), the F6 case (agent PR edits the gate to `exit 0` → still fails), byte-identical embedded gate logic, and no checkout. |
+| `agent-gates/test.py` | Contract tests against a local fake API (including K7c/K7d Cursor identity cases and ai_reviewer rules), the F6 case (agent PR edits the gate to `exit 0` → still fails), byte-identical embedded gate logic, no checkout, and required gates pinned to `runs-on: ubuntu-latest` only. |
 | `agent-gates/embedded_gate.py` | Canonical gate script; `sync_embedded_gate.py` copies it into both workflow heredocs. |
 | `agent-gates/validate_canon.py` | Validates `canon.json` bodies against the GitHub OpenAPI description |
 | `fabricbloc-side/.github/workflows/agent-review-rerun.yml` | Optional helper for fabricbloc: re-runs the pinned review check after a review. Convenience only; it can't make the check pass. |
@@ -145,11 +145,23 @@ Safe order: **(a) → main-required-ci 9 contexts → Q12 → Q14 (after the ide
 - [C11] https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps#repository-permissions-for-workflows
 - REST schema for the `workflows` rule (`repository_id`, `path`, `ref`, `sha`, `do_not_enforce_on_create`): https://docs.github.com/en/rest/orgs/rules
 
+## Runbook: required workflows vs decoy checks
+
+Org ruleset `canon-agent-gates` enforces `agent-denied-paths` and `agent-review-of-record` from **this** repo at a **pinned commit SHA** (`rulesets/canon.json` → `workflows[].sha`), not from the PR branch.
+
+**Decoy checks.** A PR can add a repo-local workflow job with the same display name that exits 0. That green row is **not** the gate. The authoritative run is the one whose check details link to  
+`https://github.com/BloclabsHQ/fabricbloc/actions/required_workflows/<ruleset-workflow-id>`  
+(or the equivalent URL on the policy repo when debugging), **not**  
+`.../actions/workflows/<workflow-file-id>`. When judging merge readiness, use the PR **mergeable** state or the checks GitHub marks **Required** — never “a green job with the right name.”
+
+**Runner trust.** Those two pinned workflows must use `runs-on: ubuntu-latest` only (no org self-hosted fleet). `agent-gates/test.py` fails CI if either workflow drifts to an expression, matrix, or self-hosted label.
+
+**After changing either gate workflow on `main`:** Cris must re-pin `canon-agent-gates` so both `workflows[].sha` and `pins.agent_gates_sha` in `rulesets/canon.json` match the new `main` commit SHA, then apply/update the org ruleset. Until re-pinned, fabricbloc still runs the old SHA.
+
 ## Unverified (TODO-VERIFY)
 
 - That BloclabsHQ is actually on Team (assumed from the task). Also that the org-ruleset UI on Team offers "Require workflows to pass". The changelog says yes, but the Team docs page for available rules doesn't list it.
 - That a same-named PR job can't satisfy the `workflows` rule (M2 proves it).
-- Whether target-repo `vars` (FLEET_ENABLED) resolve in a ruleset-required run, and whether the fleet accepts it. The fallback is `ubuntu-latest`.
 - That `agent-review-rerun.yml` can find the ruleset run by name and re-run it with `GITHUB_TOKEN` (`actions: write`). The fallback is a manual "Re-run failed jobs".
 - Cursor App permission levels, and who actually pushes Cursor commits (App installation vs Cris's user token).
 - The bot login `fabricbloc-agent-ops[bot]`. The gate also catches any `[bot]` login or a `Bot` author type, so a wrong slug only matters for the review exclusion list.

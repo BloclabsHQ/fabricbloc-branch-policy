@@ -14,7 +14,48 @@ import yaml  # pyyaml, same pin as fabricbloc canon-check
 ROOT = Path(__file__).resolve().parents[1]
 WF = ROOT / ".github" / "workflows"
 GATES = ("agent-denied-paths", "agent-review-of-record")
+REQUIRED_GATE_WORKFLOWS = GATES
+# GitHub-hosted runner labels (no self-hosted). Required org gates pin to ubuntu-latest only.
+GITHUB_HOSTED_RUNNER_LABELS = frozenset({
+    "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "ubuntu-20.04",
+    "windows-latest", "windows-2025", "windows-2022", "windows-11-arm",
+    "macos-latest", "macos-15", "macos-14", "macos-13",
+})
 HEAD, BASE, OLD = "h" * 40, "b" * 40, "o" * 40
+
+
+def assert_required_gate_hosted_only():
+    """Required org workflows must use a fixed GitHub-hosted label (ubuntu-latest)."""
+    for name in REQUIRED_GATE_WORKFLOWS:
+        doc = yaml.safe_load((WF / f"{name}.yml").read_text())
+
+        def bad_runner(value, where):
+            if value is None:
+                return
+            if isinstance(value, str):
+                low = value.lower()
+                if "self-hosted" in low or "${{" in value:
+                    raise AssertionError(f"{name} {where}: disallowed runs-on {value!r}")
+                if value.strip() != "ubuntu-latest":
+                    raise AssertionError(
+                        f"{name} {where}: runs-on must be ubuntu-latest (got {value!r})")
+                if value not in GITHUB_HOSTED_RUNNER_LABELS:
+                    raise AssertionError(f"{name} {where}: not a known GitHub-hosted label")
+                return
+            if isinstance(value, list):
+                for label in value:
+                    if isinstance(label, str) and "self-hosted" in label.lower():
+                        raise AssertionError(f"{name} {where}: self-hosted label {label!r}")
+                raise AssertionError(f"{name} {where}: runs-on must be ubuntu-latest, not a label list")
+            raise AssertionError(
+                f"{name} {where}: runs-on must be the literal string ubuntu-latest (got {value!r})")
+
+        for job_id, job in (doc.get("jobs") or {}).items():
+            bad_runner(job.get("runs-on"), f"job {job_id}")
+            strategy = job.get("strategy") or {}
+            for dim, choices in (strategy.get("matrix") or {}).items():
+                if dim == "runs-on" or "runner" in dim.lower():
+                    raise AssertionError(f"{name} job {job_id}: matrix must not select runners ({dim})")
 
 
 def embedded(name):
@@ -121,6 +162,9 @@ AGENT = dict(ref="agent/autonomous/fix/x-i1-y", author="fabricbloc-agent-ops[bot
 
 
 class T(unittest.TestCase):
+    def test_required_gates_github_hosted_only(self):
+        assert_required_gate_hosted_only()
+
     def test_copies_identical(self):
         self.assertEqual(embedded(GATES[0]), embedded(GATES[1]))
 
