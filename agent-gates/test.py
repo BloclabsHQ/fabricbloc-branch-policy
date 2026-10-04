@@ -140,18 +140,19 @@ def commit(login="Madgeniusblink", email="m@example.com", sha="c" * 40,
 def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", author_id=None,
           files=(".github/workflows/a.yml",), commits=None, reviews=(), manifest=MANIFEST, head=HEAD,
           changed=None, ncommits=None, renames=(), engine_config=None, base_ref="main",
-          commit_pulls=None):
+          commit_pulls=None, repo="BloclabsHQ/fabricbloc"):
     commits = [commit()] if commits is None else commits
     fl = [{"filename": f} for f in files] + [{"filename": n, "previous_filename": o} for o, n in renames]
+    pr_base = f"/repos/{repo}/pulls/7"
     routes = {
-        "/repos/BloclabsHQ/fabricbloc/pulls/7": {"head": {"sha": head, "ref": ref},
-                                                "base": {"sha": BASE, "ref": base_ref},
-                                                "user": {"login": author, "type": atype, **({"id": author_id} if author_id is not None else {})},
-                                                "changed_files": len(fl) if changed is None else changed,
-                                                "commits": len(commits) if ncommits is None else ncommits},
-        "/repos/BloclabsHQ/fabricbloc/pulls/7/files": fl,
-        "/repos/BloclabsHQ/fabricbloc/pulls/7/commits": commits,
-        "/repos/BloclabsHQ/fabricbloc/pulls/7/reviews": list(reviews),
+        f"{pr_base}": {"head": {"sha": head, "ref": ref},
+                       "base": {"sha": BASE, "ref": base_ref},
+                       "user": {"login": author, "type": atype, **({"id": author_id} if author_id is not None else {})},
+                       "changed_files": len(fl) if changed is None else changed,
+                       "commits": len(commits) if ncommits is None else ncommits},
+        f"{pr_base}/files": fl,
+        f"{pr_base}/commits": commits,
+        f"{pr_base}/reviews": list(reviews),
         "manifest": json.dumps(manifest) if manifest is not None else None,
         **({"config": engine_config} if engine_config is not None else {}),
     }
@@ -160,16 +161,25 @@ def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", au
         sha = c.get("sha")
         if not sha:
             continue
-        key = f"/repos/BloclabsHQ/fabricbloc/commits/{sha}/pulls"
+        key = f"/repos/{repo}/commits/{sha}/pulls"
         if sha in commit_pulls:
             routes[key] = commit_pulls[sha]
-        elif base_ref == "main":
+        else:
             routes[key] = []
     Fake.routes = routes
 
 
 def run(mode, repo="BloclabsHQ/fabricbloc", event_head=HEAD, gh_token="test", extra_env=None):
-    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN=gh_token, REPO=repo, PR="7", EVENT_HEAD_SHA=event_head)
+    env = dict(
+        os.environ,
+        MODE=mode,
+        API=API,
+        GH_TOKEN=gh_token,
+        REPO=repo,
+        PR="7",
+        EVENT_HEAD_SHA=event_head,
+        REPO_DEFAULT_BRANCH="main",
+    )
     if extra_env:
         env.update(extra_env)
     p = subprocess.run([sys.executable, "-c", embedded(mode)], env=env, capture_output=True, text=True, timeout=30)
@@ -250,8 +260,16 @@ def load_gate_constants():
 
 def run_gate_with_patch(mode, patch_src, extra_env=None):
     body = patch_src(embedded(mode))
-    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN="test", REPO="BloclabsHQ/fabricbloc",
-               PR="7", EVENT_HEAD_SHA=HEAD)
+    env = dict(
+        os.environ,
+        MODE=mode,
+        API=API,
+        GH_TOKEN="test",
+        REPO="BloclabsHQ/fabricbloc",
+        PR="7",
+        EVENT_HEAD_SHA=HEAD,
+        REPO_DEFAULT_BRANCH="main",
+    )
     if extra_env:
         env.update(extra_env)
     p = subprocess.run([sys.executable, "-c", body], env=env, capture_output=True, text=True, timeout=30)
@@ -268,8 +286,16 @@ def run_with_reviewer_bots(mode, bots, **kwargs):
         count=1,
         flags=re.M,
     )
-    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN="test", REPO="BloclabsHQ/fabricbloc",
-               PR="7", EVENT_HEAD_SHA=HEAD)
+    env = dict(
+        os.environ,
+        MODE=mode,
+        API=API,
+        GH_TOKEN="test",
+        REPO="BloclabsHQ/fabricbloc",
+        PR="7",
+        EVENT_HEAD_SHA=HEAD,
+        REPO_DEFAULT_BRANCH="main",
+    )
     env.update(kwargs.get("env", {}))
     p = subprocess.run([sys.executable, "-c", body], env=env, capture_output=True, text=True, timeout=30)
     return p.returncode, p.stdout + p.stderr
@@ -286,8 +312,16 @@ def run_with_bootstrap_refs(mode, refs, **kwargs):
         count=1,
         flags=re.M,
     )
-    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN="test", REPO="BloclabsHQ/fabricbloc",
-               PR="7", EVENT_HEAD_SHA=HEAD)
+    env = dict(
+        os.environ,
+        MODE=mode,
+        API=API,
+        GH_TOKEN="test",
+        REPO="BloclabsHQ/fabricbloc",
+        PR="7",
+        EVENT_HEAD_SHA=HEAD,
+        REPO_DEFAULT_BRANCH="main",
+    )
     env.update(kwargs.get("env", {}))
     p = subprocess.run([sys.executable, "-c", body], env=env, capture_output=True, text=True, timeout=30)
     return p.returncode, p.stdout + p.stderr
@@ -476,6 +510,25 @@ class T(unittest.TestCase):
     def test_unknown_repo_fails(self):
         self.assertEqual(run("agent-denied-paths", repo="BloclabsHQ/other")[0], 1)
 
+    def test_target_repos_includes_fabricbloc_context_keyflo(self):
+        repos = load_gate_constants()["TARGET_REPOS"]
+        self.assertEqual(
+            repos,
+            {
+                "BloclabsHQ/fabricbloc",
+                "BloclabsHQ/context",
+                "BloclabsHQ/keyflo-session-issuer",
+            },
+        )
+
+    def test_onboarded_repo_context_human_pr_passes_denied_paths(self):
+        setup(files=("docs/x.md",), repo="BloclabsHQ/context")
+        self.assertEqual(run("agent-denied-paths", repo="BloclabsHQ/context")[0], 0)
+
+    def test_onboarded_repo_keyflo_human_pr_passes_denied_paths(self):
+        setup(files=("docs/x.md",), repo="BloclabsHQ/keyflo-session-issuer")
+        self.assertEqual(run("agent-denied-paths", repo="BloclabsHQ/keyflo-session-issuer")[0], 0)
+
     def test_review_none_fails(self):
         setup(files=("docs/x.md",), **AGENT)
         self.assertEqual(run("agent-review-of-record")[0], 1)
@@ -611,7 +664,7 @@ class T(unittest.TestCase):
         commits = [commit("Madgeniusblink")]
         applies, why = ns["gate_applies"](
             "madgeniusblink/feat/x", "fabricbloc-reviewer", "User", 999001,
-            commits, "dev", humans, set(), bots)
+            commits, "dev", "main", humans, set(), bots)
         self.assertTrue(applies)
         self.assertIn("reviewer App author never qualifies for human skip", why[0])
 
@@ -631,6 +684,29 @@ class T(unittest.TestCase):
     def test_finding_c_agent_pr_base_main_follows_normal_flow(self):
         setup(files=("docs/x.md",), base_ref="main", **AGENT)
         self.assertEqual(run("agent-denied-paths")[0], 0)
+
+    def test_keyflo_default_dev_agent_base_dev_allowed(self):
+        setup(files=("docs/x.md",), base_ref="dev", repo="BloclabsHQ/keyflo-session-issuer", **AGENT)
+        env = {"REPO_DEFAULT_BRANCH": "dev"}
+        self.assertEqual(run("agent-denied-paths", repo="BloclabsHQ/keyflo-session-issuer", extra_env=env)[0], 0)
+
+    def test_keyflo_default_dev_agent_base_main_allowed(self):
+        setup(files=("docs/x.md",), base_ref="main", repo="BloclabsHQ/keyflo-session-issuer", **AGENT)
+        env = {"REPO_DEFAULT_BRANCH": "dev"}
+        self.assertEqual(run("agent-denied-paths", repo="BloclabsHQ/keyflo-session-issuer", extra_env=env)[0], 0)
+
+    def test_keyflo_default_dev_agent_base_release_rejected(self):
+        setup(files=("docs/x.md",), base_ref="release/x", repo="BloclabsHQ/keyflo-session-issuer", **AGENT)
+        env = {"REPO_DEFAULT_BRANCH": "dev"}
+        code, out = run("agent-denied-paths", repo="BloclabsHQ/keyflo-session-issuer", extra_env=env)
+        self.assertEqual(code, 1, out)
+        self.assertIn("agent PRs must target main", out)
+
+    def test_context_default_main_agent_base_dev_rejected(self):
+        setup(files=("docs/x.md",), base_ref="dev", repo="BloclabsHQ/context", **AGENT)
+        code, out = run("agent-denied-paths", repo="BloclabsHQ/context")
+        self.assertEqual(code, 1, out)
+        self.assertIn("agent PRs must target main", out)
 
     def test_bootstrap_exact_match_allows_agent_pr(self):
         setup(files=("docs/x.md",), base_ref="f6-gate-test", **AGENT)
@@ -661,7 +737,7 @@ class T(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("agent PRs must target main", out)
         ns = gate_ns_with_bootstrap([])
-        ok, bootstrap = ns["pr_base_treated_as_main"]("main")
+        ok, bootstrap = ns["pr_base_treated_as_main"]("main", "main")
         self.assertTrue(ok)
         self.assertFalse(bootstrap)
 
@@ -744,13 +820,18 @@ class T(unittest.TestCase):
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         self.assertEqual(gates.get("bypass_actors"), [])
 
-    def test_canon_agent_gates_includes_main_release_prod(self):
+    def test_canon_agent_gates_post_rollout_ref_include_default_and_main(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         inc = gates.get("_post_rollout_ref_include") or gates["conditions"]["ref_name"]["include"]
-        self.assertIn("~DEFAULT_BRANCH", inc)
-        self.assertIn("refs/heads/release/**", inc)
-        self.assertIn("refs/heads/prod/**", inc)
+        self.assertEqual(set(inc), {"~DEFAULT_BRANCH", "refs/heads/main"})
+
+    def test_canon_agent_gates_repository_name_matches_target_repos(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        short = set(gates["conditions"]["repository_name"]["include"])
+        expected = {r.split("/", 1)[1] for r in load_gate_constants()["TARGET_REPOS"]}
+        self.assertEqual(short, expected)
 
     def test_canon_push_protected_paths_covers_workflows(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
