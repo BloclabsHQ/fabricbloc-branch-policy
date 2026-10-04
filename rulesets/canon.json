@@ -28,6 +28,11 @@
       "_bootstrap_ref_include": [
         "refs/heads/f6-gate-test"
       ],
+      "_post_rollout_ref_include": [
+        "~DEFAULT_BRANCH",
+        "refs/heads/release/**",
+        "refs/heads/prod/**"
+      ],
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -40,9 +45,7 @@
         },
         "ref_name": {
           "include": [
-            "~DEFAULT_BRANCH",
-            "refs/heads/release/**",
-            "refs/heads/prod/**"
+            "refs/heads/f6-gate-test"
           ],
           "exclude": []
         }

@@ -94,9 +94,33 @@ def main():
             CANON_PATH.write_text(orig_canon)
 
     gate_mutations = [
-        ("Base check uses startswith('main') instead of != main",
-         lambda s: s.replace("if base_ref != DEFAULT_BASE_REF:", "if not base_ref.startswith(\"main\"):"),
+        ("Base check uses startswith('main') instead of exact main",
+         lambda s: s.replace(
+             "    if base_ref == DEFAULT_BASE_REF:\n        return True, False",
+             "    if base_ref.startswith(\"main\"):\n        return True, base_ref != DEFAULT_BASE_REF",
+         ),
          "test_mutation_base_check_startswith_main_would_miss_release"),
+        ("Bootstrap base uses prefix match instead of exact",
+         lambda s: s.replace(
+             "    if full in allow:\n        return True, True",
+             "    if any(full.startswith(x.rstrip(\"*\")) for x in allow):\n        return True, True",
+         ),
+         "test_mutation_bootstrap_prefix_match_would_allow_near_miss"),
+        ("Bootstrap list read from PR head via contents API",
+         lambda s: s.replace(
+             "    return BOOTSTRAP_BASE_REFS\n",
+             "    text = base_text(\"rulesets/canon.json\", os.environ.get(\"EVENT_HEAD_SHA\", \"\"))\n"
+             "    if not text:\n        return frozenset()\n"
+             "    return _bootstrap_refs_from_canon_obj(json.loads(text))\n",
+             1,
+         ),
+         "test_mutation_bootstrap_reads_from_pr_head_repo"),
+        ("Bootstrap treats empty allowlist as allow-all",
+         lambda s: s.replace(
+             "    if allow is None:\n        return False, False",
+             "    if allow is None:\n        return False, False\n    if not allow:\n        return True, True",
+         ),
+         "test_mutation_bootstrap_empty_list_allows_all_bases"),
         ("Remove PR author leg from agent_identity_reasons",
          lambda s: re.sub(
              r'    if author_type == "Bot" or is_agent\(login=author, user_id=author_id\):\n'
