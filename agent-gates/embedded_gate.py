@@ -379,6 +379,25 @@ def participants(commits, allow, author):
     return out
 
 
+def human_independent_approval_qualifies(review, head, pr_author, ai_reviewers):
+    """Non-agent/** heads: human User approval at head, not the PR author or ai_reviewer."""
+    user = review.get("user") or {}
+    login = user.get("login")
+    if not login or review.get("state") != "APPROVED":
+        return False
+    if review.get("commit_id") != head:
+        return False
+    if user.get("type") != "User":
+        return False
+    if login.lower() == (pr_author or "").lower():
+        return False
+    if login in ai_reviewers:
+        return False
+    if login.endswith("[bot]") or is_agent(login=login, user_id=user.get("id")):
+        return False
+    return True
+
+
 def approval_qualifies(review, head, allow, excluded, reviewer_bots):
     login = (review.get("user") or {}).get("login")
     uid = (review.get("user") or {}).get("id")
@@ -441,6 +460,29 @@ def main():
     applies, why = gate_applies(
         head_ref, author, author_type, author_id, commits, base_ref, default_branch,
         humans, ai_rev, reviewer_bots)
+
+    if MODE == "agent-review-of-record" and not head_ref.startswith("agent/"):
+        reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
+        latest = {}
+        for r in reviews:
+            login = (r.get("user") or {}).get("login")
+            if login and r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+                latest[login] = r
+        blocked = sorted(l for l, r in latest.items() if r["state"] == "CHANGES_REQUESTED")
+        if blocked:
+            fail(f"open CHANGES_REQUESTED from {blocked}")
+        ok = sorted(
+            l for l, r in latest.items()
+            if human_independent_approval_qualifies(r, head, author, ai_rev)
+        )
+        if not ok:
+            fail(
+                "no independent human APPROVE at head "
+                f"{head[:12]} (User, not author, not bot/App); re-run after approval"
+            )
+        print(f"{MODE}: human-approved at {head[:12]} by {ok}")
+        return
+
     if not applies:
         print(f"{MODE}: not gated ({why[0]}); human merge authority applies.")
         return

@@ -192,8 +192,8 @@ def run(mode, repo="BloclabsHQ/fabricbloc", event_head=HEAD, gh_token="test", ex
     return p.returncode, p.stdout + p.stderr
 
 
-def approve(login="Madgeniusblink", sha=HEAD, state="APPROVED", body=None, user_id=None):
-    user = {"login": login}
+def approve(login="Madgeniusblink", sha=HEAD, state="APPROVED", body=None, user_id=None, utype="User"):
+    user = {"login": login, "type": utype}
     if user_id is not None:
         user["id"] = user_id
     r = {"user": user, "state": state, "commit_id": sha}
@@ -365,8 +365,41 @@ class T(unittest.TestCase):
         self.assertEqual(code, 1, out); self.assertIn("denied path", out)
 
     def test_human_pr_not_gated(self):
-        setup()
+        setup(reviews=[approve("otherhuman")])
         self.assertEqual(run("agent-denied-paths")[0], 0)
+        self.assertEqual(run("agent-review-of-record")[0], 0)
+
+    def test_human_non_agent_head_unapproved_review_fails(self):
+        setup(ref="madgeniusblink/docs/gate-probe", reviews=[])
+        self.assertEqual(run("agent-denied-paths")[0], 0)
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+        self.assertIn("no independent human APPROVE", out)
+
+    def test_human_non_agent_head_human_approved_passes(self):
+        setup(ref="madgeniusblink/docs/gate-probe", reviews=[approve("otherhuman")])
+        self.assertEqual(run("agent-review-of-record")[0], 0)
+
+    def test_human_non_agent_author_self_approve_fails(self):
+        setup(ref="madgeniusblink/docs/gate-probe", reviews=[approve("Madgeniusblink")])
+        self.assertEqual(run("agent-review-of-record")[0], 1)
+
+    def test_human_non_agent_bot_approve_fails(self):
+        setup(
+            ref="madgeniusblink/docs/gate-probe",
+            reviews=[approve("fabricbloc-agent-ops[bot]", utype="Bot")],
+        )
+        self.assertEqual(run("agent-review-of-record")[0], 1)
+
+    def test_human_non_agent_stale_approval_fails(self):
+        setup(ref="madgeniusblink/docs/gate-probe", reviews=[approve("otherhuman", sha="0" * 40)])
+        self.assertEqual(run("agent-review-of-record")[0], 1)
+
+    def test_human_gov_handle_branch_requires_independent_human_review(self):
+        setup(reviews=[])
+        self.assertEqual(run("agent-denied-paths")[0], 0)
+        self.assertEqual(run("agent-review-of-record")[0], 1)
+        setup(reviews=[approve("otherhuman")])
         self.assertEqual(run("agent-review-of-record")[0], 0)
 
     def test_human_named_branch_with_cursor_commits_is_gated(self):
@@ -966,9 +999,12 @@ class T(unittest.TestCase):
               commits=[commit(sha=csha)], base_ref="main",
               commit_pulls={csha: [{"head": {"ref": "agent/autonomous/fix/x-i1-y"},
                                     "user": {"login": "Madgeniusblink", "type": "User"}}]})
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("commits/pulls", out)
         code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
-        self.assertIn("gated because", out)
+        self.assertIn("no independent human APPROVE", out)
 
     def test_commit_pulls_api_error_fails_closed(self):
         csha = "f" * 40
@@ -1004,7 +1040,7 @@ class T(unittest.TestCase):
               commit_pulls={csha: pulls})
         code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
-        self.assertIn("commits/pulls", out)
+        self.assertIn("no independent human APPROVE", out)
 
     def test_commit_pulls_pagination_cap_fails_closed(self):
         csha = "4" * 40
@@ -1034,9 +1070,12 @@ class T(unittest.TestCase):
               commits=[commit(sha=csha)], base_ref="main",
               commit_pulls={csha: [{"head": {"ref": "chore/index-regen-x"},
                                     "user": {"login": "Madgeniusblink", "type": "Bot"}}]})
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("commits/pulls", out)
         code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
-        self.assertIn("commits/pulls", out)
+        self.assertIn("no independent human APPROVE", out)
 
     def test_coauthored_by_lowercase_trailer_and_display_name(self):
         msg = "feat: x\n\nco-authored-by: CURSOR AGENT <cursoragent@cursor.com>"
@@ -1184,7 +1223,14 @@ class T(unittest.TestCase):
               commits=[commit(sha=csha)], base_ref="main",
               commit_pulls={csha: pulls})
         code, out = run_gate_with_patch("agent-review-of-record", patch)
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 1, out)
+        self.assertIn("no independent human APPROVE", out)
+
+    def test_non_agent_head_ai_reviewer_approval_insufficient(self):
+        cfg = "human: ['Madgeniusblink']\nai_reviewers: ['fabricbloc-ai-reviewer']\n"
+        setup(ref="madgeniusblink/docs/gate-probe", reviews=[approve("fabricbloc-ai-reviewer")],
+              engine_config=cfg)
+        self.assertEqual(run("agent-review-of-record")[0], 1)
 
     def test_mutation_commit_pulls_bad_shape_passes_human_skip(self):
         csha = "0" * 40
