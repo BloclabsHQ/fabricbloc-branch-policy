@@ -632,3 +632,37 @@ jobs:
           if __name__ == "__main__":
               main()
           PY
+
+  sweep:
+    if: >-
+      (github.event_name == 'schedule' || inputs.sweep) &&
+      vars.HYGIENE_ENABLED != 'false' &&
+      vars.HYGIENE_C1_MODE != 'off'
+    concurrency:
+      group: hygiene-c1-${{ github.repository }}-sweep
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: read
+      statuses: read
+      pull-requests: write
+    steps:
+      - name: Hourly sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ inputs.channel }}
+          ALERT_CHANNEL: ${{ inputs.alert_channel }}
+          SKIP_HEAD_GLOBS: ${{ inputs.skip_head_globs }}
+          MARKER_AUTHORS: ${{ inputs.marker_authors }}
+          SWEEP: "true"
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          HYGIENE_MODE: ${{ vars.HYGIENE_C1_MODE }}
+        run: |
+          python3 - <<'PY'
+          pass
+          PY
