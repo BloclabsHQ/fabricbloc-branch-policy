@@ -451,12 +451,31 @@ class T(unittest.TestCase):
         setup(files=(".github/actions/x/action.yml",), manifest=None, **AGENT)
         self.assertEqual(run("agent-denied-paths")[0], 1)
 
-    def test_cursor_and_claude_floor_denied(self):
+    def test_cursor_and_claude_provider_paths_warn_by_default(self):
         setup(files=(".cursor/environment.json",), **AGENT)
-        self.assertEqual(run("agent-denied-paths")[0], 1)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("::warning", out)
+        self.assertIn("AG-04", out)
         setup(files=(".claude/settings.json",), **AGENT)
-        self.assertEqual(run("agent-denied-paths")[0], 1)
-        setup(files=(".claude/hooks/guard.sh",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("provider control path", out)
+
+    def test_cursor_and_claude_provider_paths_fail_when_enforced(self):
+        setup(files=(".cursor/environment.json",), **AGENT)
+        env = dict(os.environ, PROVIDER_CONTROL_ENFORCE="fail")
+        p = subprocess.run(
+            [sys.executable, "-c", embedded("agent-denied-paths")],
+            env={**env, "MODE": "agent-denied-paths", "API": API, "GH_TOKEN": "test",
+                 "REPO": "BloclabsHQ/fabricbloc", "PR": "7", "EVENT_HEAD_SHA": HEAD},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("provider control path", p.stdout + p.stderr)
+
+    def test_floor_workflows_still_fail_without_provider_switch(self):
+        setup(files=(".github/workflows/evil.yml",), **AGENT)
         self.assertEqual(run("agent-denied-paths")[0], 1)
 
     def test_proposed_ops_not_denied_until_include_proposed(self):
@@ -500,7 +519,7 @@ class T(unittest.TestCase):
 
     def test_no_patch_denied_fail_mode(self):
         setup(
-            files=({"filename": ".cursor/environment.json"},),
+            files=({"filename": ".github/workflows/a.yml"},),
             **AGENT,
         )
         env = dict(os.environ, PROJECTION_ENFORCE="fail")
