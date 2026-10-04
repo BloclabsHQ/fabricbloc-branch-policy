@@ -79,7 +79,6 @@ jobs:
               "rulesets/",
           ]
 
-          # Floor never_allowlist (manifest may extend; hygiene always applies proposed_additions).
           FLOOR_NEVER_ALLOWLIST = frozenset({
               "BloclabsHQ/fabric-iac",
               "BloclabsHQ/fabric-tss",
@@ -175,16 +174,26 @@ jobs:
               return False
 
 
-          def fetch_manifest_denied(repo, ref):
+          def fetch_manifest_denied(repo, ref, *, mode="hygiene-manifest"):
+              """Load denied paths from base manifest. Any failure fails closed (never skip)."""
+              qpath = urllib.parse.quote(MANIFEST, safe="")
+              qref = urllib.parse.quote(ref, safe="")
+              path = f"/repos/{repo}/contents/{qpath}?ref={qref}"
               try:
-                  raw = call(
-                      f"/repos/{repo}/contents/{urllib.parse.quote(MANIFEST, safe='')}?ref={urllib.parse.quote(ref, safe='')}",
-                      accept="application/vnd.github.raw",
-                  )
+                  raw = call(path, accept="application/vnd.github.raw")
+              except HygieneAPIError as exc:
+                  fail(mode, f"manifest unreadable at {ref}: {exc}")
+              if not isinstance(raw, str) or not raw.strip():
+                  fail(mode, f"manifest missing or empty at {ref}")
+              try:
                   data = json.loads(raw)
-              except (HygieneAPIError, json.JSONDecodeError, TypeError):
-                  return list(FLOOR_DENIED), set(FLOOR_NEVER_ALLOWLIST)
-              dp = (data.get("denied_paths") or {}) if isinstance(data, dict) else {}
+              except json.JSONDecodeError:
+                  fail(mode, f"manifest invalid JSON at {ref}")
+              if not isinstance(data, dict):
+                  fail(mode, f"manifest must be a JSON object at {ref}")
+              dp = data.get("denied_paths") or {}
+              if not isinstance(dp, dict):
+                  fail(mode, "manifest denied_paths must be an object")
               denied = list(FLOOR_DENIED)
               denied += list(dp.get("arch_0048_baseline") or [])
               denied += list(dp.get("proposed_additions") or [])
