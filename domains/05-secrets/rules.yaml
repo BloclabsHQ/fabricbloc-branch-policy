@@ -1,0 +1,22 @@
+# Secrets registry lint rules (SE-*). B0: static checks + SE-06/SE-11 audit stubs.
+rules:
+  SE-01:
+    summary: "Each catalogued name appears exactly once in registry.yaml"
+  SE-02:
+    summary: "Secret and variable names use SCREAMING_SNAKE_CASE"
+  SE-04:
+    summary: "github_locations match scope/kind rules (repo not environment for repo Actions secrets)"
+  SE-05:
+    summary: "status is live|deprecated|planned; non-live entries document why in notes"
+  SE-06:
+    summary: "Live GitHub org/repo secret names match registry (names-only audit App; B0 stub)"
+    b0: stub
+  SE-08:
+    summary: "Org-scoped entries declare visibility all|private"
+  SE-11:
+    summary: "No undeclared duplicate names across scopes (names-only audit App; B0 stub)"
+    b0: stub
+  SE-12:
+    summary: "Every vendored workflow secret name is catalogued in registry.yaml"
+  SE-13:
+    summary: "Missing onepassword_item must say TODO(Cris) in notes"

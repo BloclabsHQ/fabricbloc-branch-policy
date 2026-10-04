@@ -1,0 +1,117 @@
+# FabricBloc secrets registry (names only). Aether secrets-registry-spec §5; Sentinel review B0.
+schema_version: 1
+policy_id: fabricbloc-secrets-registry
+calibrated_from: "2026-10-04 live GitHub inventory (names only); Aether secrets-registry-spec §5"
+
+entries:
+  - name: ORG_GITHUB_TOKEN
+    status: live
+    onepassword_item: null
+    notes: "TODO(Cris): org-wide PAT; visibility=all."
+    github_locations:
+      - scope: org
+        visibility: all
+
+  - name: FABRICBLOC_ACTION_AUTOMATION
+    status: live
+    onepassword_item: null
+    notes: "TODO(Cris): org private secret; fabricbloc repo override for automation PAT."
+    github_locations:
+      - scope: org
+        visibility: private
+      - scope: repo
+        repo: BloclabsHQ/fabricbloc
+        overrides_org: true
+
+  - name: CURSOR_API_KEY
+    status: live
+    onepassword_item: null
+    notes: "TODO(Cris): repo Actions secret (not an environment secret)."
+    github_locations:
+      - scope: repo
+        repo: BloclabsHQ/fabricbloc
+        kind: actions_secret
+
+  - name: SLACK_BOT_TOKEN
+    status: live
+    intentional_duplicate: true
+    duplicate_policy: N5
+    onepassword_item: null
+    notes: "TODO(Cris): intentional duplicate org + repo stores per N5."
+    github_locations:
+      - scope: org
+        visibility: private
+      - scope: repo
+        repo: BloclabsHQ/fabricbloc
+
+  - name: CLAUDE_CODE_OAUTH_TOKEN
+    status: live
+    intentional_duplicate: true
+    duplicate_policy: N5
+    onepassword_item: null
+    notes: "TODO(Cris): intentional duplicate org + repo stores per N5."
+    github_locations:
+      - scope: org
+        visibility: private
+      - scope: repo
+        repo: BloclabsHQ/fabricbloc
+
+  - name: GHCR_READ_TOKEN
+    status: live
+    onepassword_item: null
+    notes: "TODO(Cris)."
+    github_locations:
+      - scope: org
+        visibility: private
+
+  - name: MIMIR_PUSH_TOKEN
+    status: live
+    onepassword_item: null
+    notes: "TODO(Cris): canonical entry for live MIMIR_PUSH_* family."
+    github_locations:
+      - scope: org
+        visibility: private
+
+  - name: DEV_OP_SERVICE_ACCOUNT_TOKEN
+    status: live
+    onepassword_item: null
+    notes: "TODO(Cris)."
+    github_locations:
+      - scope: org
+        visibility: private
+
+  - name: AWS_ACCESS_KEY_ID
+    status: deprecated
+    onepassword_item: null
+    notes: "TODO(Cris): fabric-iac static key; deprecated — migrate to OIDC."
+    github_locations:
+      - scope: repo
+        repo: BloclabsHQ/fabric-iac
+        kind: actions_secret
+
+  - name: AWS_SECRET_ACCESS_KEY
+    status: deprecated
+    onepassword_item: null
+    notes: "TODO(Cris): fabric-iac static key pair; deprecated."
+    github_locations:
+      - scope: repo
+        repo: BloclabsHQ/fabric-iac
+        kind: actions_secret
+
+  - name: POLICY_AUDIT_APP_ID
+    status: planned
+    onepassword_item: null
+    notes: "TODO(Cris): fabricbloc-policy-audit App id as Actions variable on fabricbloc-branch-policy."
+    github_locations:
+      - scope: repo
+        repo: BloclabsHQ/fabricbloc-branch-policy
+        kind: actions_variable
+
+  - name: POLICY_AUDIT_APP_PRIVATE_KEY
+    status: planned
+    onepassword_item: null
+    notes: "TODO(Cris): mint names-only installation token for drift/audit workflows."
+    github_locations:
+      - scope: repo
+        repo: BloclabsHQ/fabricbloc-branch-policy
+        kind: actions_secret

@@ -16,3 +16,4 @@ One row per enforced rule. Consumers pin this repo at a release SHA and cite IDs
 | CU-10 | 04-cursor | Phase-in: new sessions only; grandfather MadEngineer in-flight + `agent/autonomous/**` | Harness | domains/04-cursor/tests/test_cloud_sessions.py |
 | AG-04 | 03-agent-gates | Deny agent PR edits under floor paths; `.cursor/**` and `.claude/**` warn-first (`PROVIDER_CONTROL_ENFORCE`) | Pinned `agent-denied-paths` | agent-gates/test.py |
 | AG-05 | 03-agent-gates | Projection must be URL or pinned SHA/release asset, not parent checkout/submodule | Pinned `agent-denied-paths` (`PROJECTION_ENFORCE`) | agent-gates/test.py |
+| SE-01 | 05-secrets | Canonical secrets registry (Aether §5 names-only inventory + static lint SE-01/02/04/05/08/12/13) | `domains/05-secrets/registry.yaml` + validators | domains/05-secrets/tests/test_secrets_registry.py |
