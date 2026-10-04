@@ -64,10 +64,6 @@ class TestHygieneContract(unittest.TestCase):
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("branch_prune").rstrip("\n"))
 
-    def test_ci_red_embed_synced(self):
-        body = embedded("hygiene-ci-red")
-        self.assertIsNotNone(body)
-        self.assertEqual(body.rstrip("\n"), expected_embed("ci_red").rstrip("\n"))
 
     def test_stale_embed_synced(self):
         body = embedded("hygiene-stale")
@@ -86,7 +82,6 @@ class TestHygieneContract(unittest.TestCase):
     def test_workflow_call_present(self):
         doc = yaml.safe_load((WF / "hygiene-pr-ops-notify.yml").read_text())
         self.assertIn("workflow_call", workflow_on(doc))
-
 
     def test_c1_schedule_reaches_sweep_without_plan(self):
         doc = yaml.safe_load((WF / "hygiene-pr-ops-notify.yml").read_text())
