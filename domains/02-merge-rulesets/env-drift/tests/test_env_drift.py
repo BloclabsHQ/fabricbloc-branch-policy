@@ -184,7 +184,7 @@ class LiveAndCliTests(unittest.TestCase):
             code, rep = ed.run(["--live"], env={})
         self.assertEqual((code, rep), (0, None))
         self.assertIn("::warning::", buf.getvalue())
-        self.assertIn("GH_AUDIT_TOKEN", buf.getvalue())
+        self.assertIn("POLICY_AUDIT_INSTALLATION_TOKEN", buf.getvalue())
 
     def test_live_run_without_token_strict_live_fails(self) -> None:
         buf = io.StringIO()
@@ -212,7 +212,7 @@ class LiveAndCliTests(unittest.TestCase):
 
     def test_token_never_in_report(self) -> None:
         api = FakeAPI({ENVS: fx("environments.agent-ops-bypass-true.json"), BPS: fx("branch-policies.wildcard.json")})
-        code, rep = ed.run(["--live"], fetch=api, env={"GH_AUDIT_TOKEN": "SECRET-SENTINEL-9"})
+        code, rep = ed.run(["--live"], fetch=api, env={"POLICY_AUDIT_INSTALLATION_TOKEN": "SECRET-SENTINEL-9"})
         self.assertEqual(code, 1)
         self.assertNotIn("SECRET-SENTINEL-9", json.dumps(rep))
 

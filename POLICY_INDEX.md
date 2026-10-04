@@ -14,4 +14,3 @@ One row per enforced rule. Consumers pin this repo at a release SHA and cite IDs
 | CU-08 | 04-cursor | Agent/harness tickets: label → MadAgentPM → Loom | Process routing | domains/04-cursor/tests/test_cloud_sessions.py |
 | CU-09 | 04-cursor | Loom never reviews its own PRs | Review-of-record + routing | domains/04-cursor/tests/test_cloud_sessions.py |
 | CU-10 | 04-cursor | Phase-in: new sessions only; grandfather MadEngineer in-flight + `agent/autonomous/**` | Harness | domains/04-cursor/tests/test_cloud_sessions.py |
-| MR-11 | 02-merge-rulesets | fabricbloc deployment envs: no admin bypass; agent-ops deploys from main only; prevent_self_review when reviewers set | Scheduled `policy-env-drift.yml` | domains/02-merge-rulesets/env-drift/tests/test_env_drift.py |

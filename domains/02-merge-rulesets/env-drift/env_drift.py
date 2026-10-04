@@ -26,9 +26,8 @@ Offline use (JSON saved with `gh api`):
   python3 domains/02-merge-rulesets/env-drift/env_drift.py \\
       --environments-json envs.json \\
       --branch-policies agent-ops=agent-ops-branch-policies.json
-Live use (token needs repository **Environments: read** on fabricbloc, e.g.
-fabricbloc-policy-audit App):
-  GH_AUDIT_TOKEN=... python3 domains/02-merge-rulesets/env-drift/env_drift.py --live
+Live use (short-lived fabricbloc-policy-audit installation token):
+  POLICY_AUDIT_INSTALLATION_TOKEN=... python3 domains/02-merge-rulesets/env-drift/env_drift.py --live
 Scheduled: `.github/workflows/policy-env-drift.yml` (MR-11).
 """
 
@@ -205,7 +204,7 @@ def fetch_live(fetch: Fetch, token: str, policy: dict[str, Any]) -> tuple[dict[s
 
 def live_findings(fetch: Fetch, token: str | None, policy: dict[str, Any]) -> list[Finding]:
     if not token:
-        return [finding("environments", "GH_AUDIT_TOKEN absent; environments not compared", "unverified")]
+        return [finding("environments", "POLICY_AUDIT_INSTALLATION_TOKEN absent; environments not compared", "unverified")]
     try:
         envs, bps = fetch_live(fetch, token, policy)
     except urllib.error.HTTPError as exc:
@@ -240,11 +239,11 @@ def run(argv: list[str], fetch: Fetch | None = None, env: dict[str, str] | None 
         manifest = json.loads(args.manifest.read_text()) if args.manifest.is_file() else None
         policy = policy_from_manifest(manifest)
         if args.live:
-            token = (env.get("GH_AUDIT_TOKEN") or "").strip()
+            token = (env.get("POLICY_AUDIT_INSTALLATION_TOKEN") or "").strip()
             if not token:
                 skip_msg = (
-                    "GH_AUDIT_TOKEN not set; live environment drift check skipped "
-                    "(configure repository secret for fabricbloc Environments: read)"
+                    "POLICY_AUDIT_INSTALLATION_TOKEN not set; live environment drift check skipped "
+                    "(configure POLICY_AUDIT_APP_ID / POLICY_AUDIT_APP_PRIVATE_KEY on this repo)"
                 )
                 print(f"::warning::{skip_msg}")
                 summary_path = env.get("GITHUB_STEP_SUMMARY", "").strip()
