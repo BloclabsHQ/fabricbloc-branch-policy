@@ -4,6 +4,19 @@ Canonical Python lives in `hygiene/*.py`. Reusable workflows embed the same byte
 
 ## Caller pin
 
+Reusable workflows (pin each at `rulesets/canon.json` → `pins.hygiene_sha`):
+
+| C | Workflow |
+|---|----------|
+| C1 | `hygiene-pr-ops-notify.yml` |
+| C2 | `hygiene-stale.yml` |
+| C3 | `hygiene-auto-merge.yml` |
+| C4 | `hygiene-ci-red.yml` |
+| C5 | `hygiene-branch-prune.yml` |
+| C6 | `hygiene-backlog-lint.yml` |
+
+Example caller:
+
 ```yaml
 uses: BloclabsHQ/fabricbloc-branch-policy/.github/workflows/hygiene-pr-ops-notify.yml@<pins.hygiene_sha>
 secrets:
