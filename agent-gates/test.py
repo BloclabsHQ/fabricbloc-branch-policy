@@ -74,7 +74,7 @@ def embedded(name):
 
 MANIFEST = {"operators": {"members_expected": ["Madgeniusblink"]},
             "denied_paths": {"arch_0048_baseline": [".github/workflows/", "decisions/"],
-                             "proposed_additions": [".cursor/"]}}
+                             "proposed_additions": ["ops/"]}}
 
 
 class Fake:
@@ -142,7 +142,13 @@ def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", au
           changed=None, ncommits=None, renames=(), engine_config=None, base_ref="main",
           commit_pulls=None, repo="BloclabsHQ/fabricbloc"):
     commits = [commit()] if commits is None else commits
-    fl = [{"filename": f} for f in files] + [{"filename": n, "previous_filename": o} for o, n in renames]
+    fl = []
+    for f in files:
+        if isinstance(f, dict):
+            fl.append(f)
+        else:
+            fl.append({"filename": f})
+    fl += [{"filename": n, "previous_filename": o} for o, n in renames]
     pr_base = f"/repos/{repo}/pulls/7"
     routes = {
         f"{pr_base}": {"head": {"sha": head, "ref": ref},
@@ -479,9 +485,167 @@ class T(unittest.TestCase):
         setup(files=(".github/actions/x/action.yml",), manifest=None, **AGENT)
         self.assertEqual(run("agent-denied-paths")[0], 1)
 
-    def test_proposed_not_applied_by_default(self):
+    def test_cursor_and_claude_provider_paths_warn_by_default(self):
         setup(files=(".cursor/environment.json",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("::warning", out)
+        self.assertIn("AG-04", out)
+        setup(files=(".claude/settings.json",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("provider control path", out)
+
+    def test_cursor_and_claude_provider_paths_fail_when_enforced(self):
+        setup(files=(".cursor/environment.json",), **AGENT)
+        env = dict(os.environ, PROVIDER_CONTROL_ENFORCE="fail")
+        p = subprocess.run(
+            [sys.executable, "-c", embedded("agent-denied-paths")],
+            env={**env, "MODE": "agent-denied-paths", "API": API, "GH_TOKEN": "test",
+                 "REPO": "BloclabsHQ/fabricbloc", "PR": "7", "EVENT_HEAD_SHA": HEAD,
+                 "REPO_DEFAULT_BRANCH": "main"},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("provider control path", p.stdout + p.stderr)
+
+    def test_floor_workflows_still_fail_without_provider_switch(self):
+        setup(files=(".github/workflows/evil.yml",), **AGENT)
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_proposed_ops_not_denied_until_include_proposed(self):
+        setup(files=("ops/deploy/x.sh",), **AGENT)
         self.assertEqual(run("agent-denied-paths")[0], 0)
+
+    def test_projection_ignores_removed_context_lines(self):
+        setup(
+            files=({
+                "filename": "docs/projection.md",
+                "patch": (
+                    " context line\n"
+                    "-run git submodule update --init\n"
+                    "+plain docs only\n"
+                ),
+            },),
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("AG-05", out)
+
+    def test_projection_warn_does_not_fail(self):
+        setup(
+            files=({
+                "filename": "docs/projection.md",
+                "patch": "+see ../../fabricbloc/skills/foo for copy\n",
+            },),
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("::warning", out)
+        self.assertIn("AG-05", out)
+
+    def test_no_patch_emits_warning(self):
+        setup(files=({"filename": "docs/binary.png"},), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("no diff patch", out)
+
+    def test_no_patch_denied_fail_mode(self):
+        setup(
+            files=({"filename": ".github/workflows/a.yml"},),
+            **AGENT,
+        )
+        env = dict(os.environ, PROJECTION_ENFORCE="fail")
+        p = subprocess.run(
+            [sys.executable, "-c", embedded("agent-denied-paths")],
+            env={**env, "MODE": "agent-denied-paths", "API": API, "GH_TOKEN": "test",
+                 "REPO": "BloclabsHQ/fabricbloc", "PR": "7", "EVENT_HEAD_SHA": HEAD,
+                 "REPO_DEFAULT_BRANCH": "main"},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("no diff patch", p.stdout + p.stderr)
+
+    def test_projection_enforce_invalid_fails_loud(self):
+        setup(files=("docs/x.md",), **AGENT)
+        env = dict(os.environ, PROJECTION_ENFORCE="maybe")
+        p = subprocess.run(
+            [sys.executable, "-c", embedded("agent-denied-paths")],
+            env={**env, "MODE": "agent-denied-paths", "API": API, "GH_TOKEN": "test",
+                 "REPO": "BloclabsHQ/fabricbloc", "PR": "7", "EVENT_HEAD_SHA": HEAD,
+                 "REPO_DEFAULT_BRANCH": "main"},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("PROJECTION_ENFORCE", p.stdout + p.stderr)
+
+    def test_mutation_ag04_skips_denied_path_check(self):
+        setup(files=(".github/workflows/evil.yml",), **AGENT)
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+        def patch(body):
+            return body.replace(
+                "        if bad:\n            fail(f\"{len(bad)} denied path(s)\")",
+                "        if False and bad:\n            fail(f\"{len(bad)} denied path(s)\")",
+                1,
+            )
+
+        setup(files=(".github/workflows/evil.yml",), **AGENT)
+        code, out = run_gate_with_patch("agent-denied-paths", patch)
+        self.assertEqual(code, 0, out)
+
+    def test_mutation_ag05_scans_full_patch_not_added_only(self):
+        setup(
+            files=({
+                "filename": "docs/projection.md",
+                "patch": "-run git submodule update --init\n+safe added line\n",
+            },),
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("AG-05", out)
+
+        def patch(body):
+            return body.replace(
+                "            added = projection_added_text(patch)\n"
+                "            if not added:\n"
+                "                continue\n"
+                "            for pat, msg in PROJECTION_PATTERNS:\n"
+                "                if pat.search(added):",
+                "            for pat, msg in PROJECTION_PATTERNS:\n"
+                "                if pat.search(patch):",
+                1,
+            )
+
+        setup(
+            files=({
+                "filename": "docs/projection.md",
+                "patch": "-run git submodule update --init\n+safe added line\n",
+            },),
+            **AGENT,
+        )
+        code, out = run_gate_with_patch("agent-denied-paths", patch)
+        self.assertEqual(code, 0, out)
+        self.assertIn("AG-05", out)
+
+    def test_projection_fail_mode(self):
+        setup(
+            files=({"filename": "docs/projection.md",
+                    "patch": "+run git submodule update --init\n"},),
+            **AGENT,
+        )
+        env = dict(os.environ, PROJECTION_ENFORCE="fail")
+        p = subprocess.run(
+            [sys.executable, "-c", embedded("agent-denied-paths")],
+            env={**env, "MODE": "agent-denied-paths", "API": API, "GH_TOKEN": "test",
+                 "REPO": "BloclabsHQ/fabricbloc", "PR": "7", "EVENT_HEAD_SHA": HEAD,
+                 "REPO_DEFAULT_BRANCH": "main"},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
 
     def test_empty_diff_fails(self):
         setup(files=(), **AGENT)
@@ -676,8 +840,8 @@ class T(unittest.TestCase):
         self.assertIn("ai_reviewers", out)
 
     def test_finding_c_agent_pr_base_release_fails(self):
-        setup(files=("docs/x.md",), base_ref="release/x", **AGENT)
-        code, out = run("agent-denied-paths")
+        setup(files=("docs/x.md",), base_ref="release/x", repo="BloclabsHQ/fabricbloc", **AGENT)
+        code, out = run("agent-denied-paths", repo="BloclabsHQ/fabricbloc")
         self.assertEqual(code, 1, out)
         self.assertIn("agent PRs must target main", out)
 
@@ -820,11 +984,19 @@ class T(unittest.TestCase):
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         self.assertEqual(gates.get("bypass_actors"), [])
 
-    def test_canon_agent_gates_post_rollout_ref_include_default_and_main(self):
+    def test_canon_agent_gates_post_rollout_ref_include_default_main_release_prod(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         inc = gates.get("_post_rollout_ref_include") or gates["conditions"]["ref_name"]["include"]
-        self.assertEqual(set(inc), {"~DEFAULT_BRANCH", "refs/heads/main"})
+        self.assertEqual(
+            set(inc),
+            {
+                "~DEFAULT_BRANCH",
+                "refs/heads/main",
+                "refs/heads/release/**",
+                "refs/heads/prod/**",
+            },
+        )
 
     def test_canon_agent_gates_repository_name_matches_target_repos(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())

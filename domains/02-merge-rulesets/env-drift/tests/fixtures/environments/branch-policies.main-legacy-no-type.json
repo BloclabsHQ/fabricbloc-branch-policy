@@ -1,0 +1,10 @@
+{
+  "total_count": 1,
+  "branch_policies": [
+    {
+      "id": 100,
+      "node_id": "x",
+      "name": "main"
+    }
+  ]
+}

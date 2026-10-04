@@ -72,7 +72,21 @@ jobs:
               ".github/actions/", "decisions/", "architecture/decisions/",
               "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS",
           ]
-          INCLUDE_PROPOSED = False  # flip to True (and re-pin) once FOUNDER-DECISIONS Q9 = yes
+          # Q9 provider control surfaces (AG-04): warn-first; hard-fail via PROVIDER_CONTROL_ENFORCE=fail (see DECISIONS F6-D7).
+          FLOOR_PROVIDER_CONTROL = [".cursor/", ".claude/"]
+          # Remaining Q9 manifest proposed_additions (e.g. ops/): see DECISIONS.md F6-D7; flip after founder yes.
+          INCLUDE_PROPOSED = False
+          # AG-04 provider paths: warn first; set PROVIDER_CONTROL_ENFORCE=fail (workflow env) after one warn cycle.
+          PROVIDER_CONTROL_ENFORCE = os.environ.get("PROVIDER_CONTROL_ENFORCE", "warn").strip().lower()
+          # AG-05 projection: URL or pinned SHA/release asset; never parent checkout / submodule init.
+          # Set PROJECTION_ENFORCE=fail (workflow env) after one warn cycle.
+          PROJECTION_ENFORCE = os.environ.get("PROJECTION_ENFORCE", "warn").strip().lower()
+          PROJECTION_PATTERNS = (
+              (re.compile(r"git\s+submodule\s+(update|init)", re.I), "git submodule init/update"),
+              (re.compile(r"submodule:\s*true", re.I), "actions checkout submodule: true"),
+              (re.compile(r"\.\./\.\./[A-Za-z0-9_.-]+"), "relative parent checkout path (../..)"),
+              (re.compile(r"uses:\s*\S+@[^\s#]*\bmain\b"), "reusable workflow pinned to @main not SHA"),
+          )
           AGENT_USER_IDS = {199161495}
           AGENT_LOGINS = {"cursoragent"}
           AGENT_EMAILS = {
@@ -113,6 +127,15 @@ jobs:
           def fail(msg):
               print(f"::error::{MODE}: {msg}")
               sys.exit(1)
+
+
+          def projection_added_text(patch):
+              """AG-05 scans added lines only (+), not context or deletions."""
+              out = []
+              for ln in patch.splitlines():
+                  if ln.startswith("+") and not ln.startswith("+++"):
+                      out.append(ln[1:])
+              return "\n".join(out)
 
 
           def is_reviewer_app(login, user_id, bots):
@@ -525,11 +548,71 @@ jobs:
                   def hit(p, e):
                       return p.startswith(e) if e.endswith("/") else (p == e or p.startswith(e))
 
+                  if PROJECTION_ENFORCE not in ("warn", "fail"):
+                      fail(f"PROJECTION_ENFORCE must be 'warn' or 'fail', got {PROJECTION_ENFORCE!r}")
+                  if PROVIDER_CONTROL_ENFORCE not in ("warn", "fail"):
+                      fail(f"PROVIDER_CONTROL_ENFORCE must be 'warn' or 'fail', got {PROVIDER_CONTROL_ENFORCE!r}")
+
+                  missing_patch_denied = []
+                  for f in files:
+                      path = f["filename"]
+                      if f.get("patch"):
+                          continue
+                      print(
+                          f"::warning file={path}::no diff patch (binary or too large); "
+                          "AG-05 cannot scan added lines"
+                      )
+                      if PROJECTION_ENFORCE == "fail" and any(hit(path, e) for e in denied):
+                          missing_patch_denied.append(path)
+                  if missing_patch_denied:
+                      for p in sorted(missing_patch_denied):
+                          print(
+                              f"::error file={p}::denied path with no diff patch "
+                              "(AG-04; PROJECTION_ENFORCE=fail)"
+                          )
+                      fail(f"{len(missing_patch_denied)} denied path(s) without diff patch")
+
                   bad = sorted({p for p in paths for e in denied if hit(p, e)})
                   for p in bad:
-                      print(f"::error file={p}::denied path for agent PRs (ARCH-0048 decision 5)")
+                      print(f"::error file={p}::denied path for agent PRs (ARCH-0048 decision 5 / AG-04)")
                   if bad:
                       fail(f"{len(bad)} denied path(s)")
+
+                  provider_hits = sorted({p for p in paths for e in FLOOR_PROVIDER_CONTROL if hit(p, e)})
+                  for p in provider_hits:
+                      line = (
+                          f"::error file={p}::provider control path for agent PRs (AG-04 / Q9)"
+                          if PROVIDER_CONTROL_ENFORCE == "fail"
+                          else f"::warning file={p}::provider control path for agent PRs (AG-04 / Q9) "
+                               f"(set PROVIDER_CONTROL_ENFORCE=fail to block)"
+                      )
+                      print(line)
+                  if provider_hits and PROVIDER_CONTROL_ENFORCE == "fail":
+                      fail(f"{len(provider_hits)} provider control path(s)")
+
+                  proj = []
+                  for f in files:
+                      patch = f.get("patch") or ""
+                      if not patch:
+                          continue
+                      added = projection_added_text(patch)
+                      if not added:
+                          continue
+                      for pat, msg in PROJECTION_PATTERNS:
+                          if pat.search(added):
+                              proj.append((f["filename"], msg))
+                              break
+                  for path, msg in sorted(set(proj)):
+                      line = (
+                          f"::error file={path}::projection violation (AG-05): {msg}"
+                          if PROJECTION_ENFORCE == "fail"
+                          else f"::warning file={path}::projection violation (AG-05): {msg} "
+                               f"(set PROJECTION_ENFORCE=fail to block)"
+                      )
+                      print(line)
+                  if proj and PROJECTION_ENFORCE == "fail":
+                      fail(f"{len(set(proj))} projection violation(s)")
+
                   print(f"{MODE}: {len(paths)} path(s), none denied.")
                   return
 
