@@ -248,6 +248,79 @@
       ]
     },
     {
+      "_repository": "context",
+      "name": "canon-branch-creation-restricted",
+      "_finding": "Finding (c) layer B on BloclabsHQ/context (default branch main).",
+      "_comment": "Same shape as fabricbloc: block branch creation outside main, agent/**, and GOV-0022 handle paths. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "refs/heads/**"
+          ],
+          "exclude": [
+            "refs/heads/main",
+            "refs/heads/agent/**",
+            "refs/heads/madgeniusblink/feat/**",
+            "refs/heads/madgeniusblink/fix/**",
+            "refs/heads/madgeniusblink/chore/**",
+            "refs/heads/madgeniusblink/docs/**",
+            "refs/heads/madgeniusblink/refactor/**",
+            "refs/heads/madgeniusblink/test/**",
+            "refs/heads/madgeniusblink/ci/**",
+            "refs/heads/madgeniusblink/perf/**",
+            "refs/heads/madgeniusblink/revert/**",
+            "refs/heads/madgeniusblink/build/**",
+            "refs/heads/madgeniusblink/style/**"
+          ]
+        }
+      },
+      "bypass_actors": [],
+      "rules": [
+        {
+          "type": "creation"
+        }
+      ]
+    },
+    {
+      "_repository": "keyflo-session-issuer",
+      "name": "canon-branch-creation-restricted",
+      "_finding": "Finding (c) layer B on BloclabsHQ/keyflo-session-issuer (default branch dev).",
+      "_comment": "Same as fabricbloc plus refs/heads/dev (repo default). Agent merge bases remain dev and main via canon-agent-gates. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "refs/heads/**"
+          ],
+          "exclude": [
+            "refs/heads/main",
+            "refs/heads/dev",
+            "refs/heads/agent/**",
+            "refs/heads/madgeniusblink/feat/**",
+            "refs/heads/madgeniusblink/fix/**",
+            "refs/heads/madgeniusblink/chore/**",
+            "refs/heads/madgeniusblink/docs/**",
+            "refs/heads/madgeniusblink/refactor/**",
+            "refs/heads/madgeniusblink/test/**",
+            "refs/heads/madgeniusblink/ci/**",
+            "refs/heads/madgeniusblink/perf/**",
+            "refs/heads/madgeniusblink/revert/**",
+            "refs/heads/madgeniusblink/build/**",
+            "refs/heads/madgeniusblink/style/**"
+          ]
+        }
+      },
+      "bypass_actors": [],
+      "rules": [
+        {
+          "type": "creation"
+        }
+      ]
+    },
+    {
       "_repository": "fabricbloc",
       "name": "canon-deploy-branches-human-only",
       "_finding": "Finding (c). release/** and prod/** creation and direct updates are human-only (org admin break-glass).",
