@@ -247,3 +247,4 @@ Create the App in the BloclabsHQ org settings. It must not appear on any ruleset
 - Which files submodule-bump touches, and who owns the PAT (Q16, and whether Q14 blocks `.gitmodules` edits by it).
 - Existing live org and repo rulesets and classic protection. The connector has no rulesets endpoint.
 - Whether the `update` rule plus `pull_request`-mode admin bypass lets Cris merge on branch-policy without extra clicks.
+
