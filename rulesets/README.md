@@ -19,7 +19,7 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 
 | Ruleset | Scope | Enforces | Bypass |
 |---|---|---|---|
-| `canon-agent-gates` | org → fabricbloc `~DEFAULT_BRANCH` | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (F6) | none |
+| `canon-agent-gates` | org → fabricbloc `~ALL` (+ `refs/heads/main`) | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (F6) | none |
 | `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8e6a8e` | none |
 | `main-required-ci` | fabricbloc `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR with 0 approvals and squash only, 9 contexts pinned to Actions 15368 | OrganizationAdmin (`pull_request`) |
 | `canon-agent-branches` | fabricbloc `agent/**` | No force-push | none |

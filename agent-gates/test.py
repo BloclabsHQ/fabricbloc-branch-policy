@@ -26,7 +26,10 @@ HEAD, BASE, OLD = "h" * 40, "b" * 40, "o" * 40
 
 def validate_required_gate_hosted_only(name, doc):
     """Required org workflows must use literal runs-on: ubuntu-latest on every job."""
-    for job_id, job in (doc.get("jobs") or {}).items():
+    jobs = doc.get("jobs") or {}
+    if not jobs:
+        raise AssertionError(f"{name}: jobs must not be empty")
+    for job_id, job in jobs.items():
         if "uses" in job:
             raise AssertionError(
                 f"{name} job {job_id}: reusable workflow jobs (uses:) are not allowed")
@@ -157,8 +160,34 @@ def run(mode, repo="BloclabsHQ/fabricbloc", event_head=HEAD, gh_token="test"):
     return p.returncode, p.stdout + p.stderr
 
 
-def approve(login="Madgeniusblink", sha=HEAD, state="APPROVED"):
-    return {"user": {"login": login}, "state": state, "commit_id": sha}
+def approve(login="Madgeniusblink", sha=HEAD, state="APPROVED", body=None, user_id=None):
+    user = {"login": login}
+    if user_id is not None:
+        user["id"] = user_id
+    r = {"user": user, "state": state, "commit_id": sha}
+    if body is not None:
+        r["body"] = body
+    return r
+
+
+def reviewer_body(sha=HEAD, ref="cli:probe-token-abcdef"):
+    return f"approve head {sha}\napproval-ref: {ref}"
+
+
+def load_gate_constants():
+    src = (ROOT / "agent-gates" / "embedded_gate.py").read_text()
+    ns = {}
+    exec(src.replace("\nmain()\n", "\n"), ns)  # noqa: S102
+    return ns
+
+
+def run_with_reviewer_bots(mode, bots, **kwargs):
+    env_extra = {"REVIEWER_APP_BOTS_TEST": json.dumps(bots)}
+    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN="test", REPO="BloclabsHQ/fabricbloc",
+               PR="7", EVENT_HEAD_SHA=HEAD, **env_extra)
+    env.update(kwargs.get("env", {}))
+    p = subprocess.run([sys.executable, "-c", embedded(mode)], env=env, capture_output=True, text=True, timeout=30)
+    return p.returncode, p.stdout + p.stderr
 
 
 AGENT = dict(ref="agent/autonomous/fix/x-i1-y", author="fabricbloc-agent-ops[bot]", atype="Bot",
@@ -179,6 +208,7 @@ class T(unittest.TestCase):
             ("label list", {"jobs": {"gate": {"runs-on": ["ubuntu-latest"], "steps": [{"run": "true"}]}}}),
             ("matrix runs-on", {"jobs": {"gate": {"runs-on": "ubuntu-latest", "strategy": {"matrix": {"runs-on": ["ubuntu-latest"]}}, "steps": [{"run": "true"}]}}}),
             ("self-hosted label", {"jobs": {"gate": {"runs-on": '["self-hosted","linux","x64"]', "steps": [{"run": "true"}]}}}),
+            ("empty jobs", {"jobs": {}}),
         )
         for label, doc in cases:
             with self.subTest(label):
@@ -354,6 +384,125 @@ class T(unittest.TestCase):
         setup(ref='agent/x";$(touch /tmp/pwned);"', files=("docs/x.md",), atype="Bot", author="fabricbloc-agent-ops[bot]")
         run("agent-denied-paths")
         self.assertFalse(Path("/tmp/pwned").exists())
+
+    def test_canon_agent_gates_ref_include_covers_all(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        found = False
+        for rs in canon["organization_rulesets"]:
+            if rs.get("name") != "canon-agent-gates":
+                continue
+            found = True
+            inc = rs["conditions"]["ref_name"]["include"]
+            self.assertIn("~ALL", inc)
+            self.assertIn("refs/heads/main", inc)
+        self.assertTrue(found, "canon-agent-gates missing from canon.json")
+
+    def test_reviewer_app_bots_disjoint_from_agent_identities(self):
+        ns = load_gate_constants()
+        bots = ns["REVIEWER_APP_BOTS"]
+        agent_logins = set(ns["AGENT_LOGINS"]) | {
+            "cursoragent", "cursor[bot]", "fabricbloc-agent-ops[bot]",
+            "chatgpt-codex-connector[bot]", "claude[bot]",
+            "copilot-pull-request-reviewer[bot]", "github-actions[bot]",
+        }
+        agent_ids = set(ns["AGENT_USER_IDS"])
+        for login, uid in bots:
+            self.assertNotIn(login.lower(), {x.lower() for x in agent_logins})
+            self.assertNotIn(uid, agent_ids)
+
+    def test_reviewer_app_approval_at_head_valid_body_passes(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, body=reviewer_body(), user_id=999001)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 0, out)
+
+    def test_reviewer_app_wrong_numeric_id_fails(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, body=reviewer_body(), user_id=999002)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 1, out)
+
+    def test_reviewer_app_missing_sha_in_body_fails(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, body="approval-ref: cli:abcdef12", user_id=999001)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 1, out)
+        self.assertIn("lacks full 40-char head SHA", out)
+
+    def test_reviewer_app_missing_approval_ref_fails(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, body=HEAD, user_id=999001)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 1, out)
+        self.assertIn("approval-ref", out)
+
+    def test_reviewer_app_stale_commit_id_fails(self):
+        cfg = "human: ['Madgeniusblink', 'fabricbloc-reviewer[bot]']\n"
+        bot = "fabricbloc-reviewer[bot]"
+        bots = [[bot, 999001]]
+        setup(files=("docs/x.md",),
+              reviews=[approve(bot, sha=OLD, body=reviewer_body(OLD), user_id=999001)],
+              engine_config=cfg, **AGENT)
+        code, out = run_with_reviewer_bots("agent-review-of-record", bots)
+        self.assertEqual(code, 1, out)
+
+    def test_reviewer_app_never_human_skip(self):
+        ns = load_gate_constants()
+        bots = {("fabricbloc-reviewer", 999001)}
+        humans = {"Madgeniusblink", "fabricbloc-reviewer"}
+        commits = [commit("Madgeniusblink")]
+        applies, why = ns["gate_applies"](
+            "madgeniusblink/feat/x", "fabricbloc-reviewer", "User", 999001,
+            commits, humans, set(), bots)
+        self.assertTrue(applies)
+        self.assertIn("reviewer App author never qualifies for human skip", why[0])
+
+    def test_unparseable_ai_reviewers_fails_closed(self):
+        cfg = "human: ['Madgeniusblink']\nai_reviewers:\n  - bot\n"
+        setup(files=("docs/x.md",), engine_config=cfg, **AGENT)
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+        self.assertIn("ai_reviewers", out)
+
+    def test_policy_audit_workflow_triggers_and_runner(self):
+        doc = yaml.safe_load((WF / "fabricbloc-policy-audit.yml").read_text())
+        on = doc.get("on")
+        if on is None:
+            on = doc.get(True) or {}
+        triggers = set()
+        if isinstance(on, dict):
+            triggers = set(on.keys())
+        elif isinstance(on, list):
+            triggers = set(on)
+        for bad in ("pull_request", "pull_request_target"):
+            self.assertNotIn(bad, triggers)
+        self.assertTrue({"schedule", "workflow_dispatch"} & triggers)
+        job = doc["jobs"]["audit"]
+        self.assertEqual(job.get("runs-on"), "ubuntu-latest")
+        uses = json.dumps(job)
+        self.assertNotIn("pull_request", uses)
+
+    def test_policy_audit_normalize_self_test(self):
+        p = subprocess.run(
+            [sys.executable, str(ROOT / "agent-gates" / "policy_audit_snapshot.py"), "--normalize-self-test"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
 
 if __name__ == "__main__":
