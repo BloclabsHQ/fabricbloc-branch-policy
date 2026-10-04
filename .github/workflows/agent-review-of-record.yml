@@ -115,9 +115,6 @@ jobs:
           MAX_COMMITS = 250  # pulls/{n}/commits hard limit
           MAX_COMMIT_PULLS = 500  # commits/{sha}/pulls hard limit
           CANON_AGENT_GATES = "canon-agent-gates"
-          # Embedded at pin from rulesets/canon.json (canon-agent-gates._bootstrap_ref_include).
-          # agent-gates/sync_embedded_gate.py refreshes this line; never read from the gated PR repo.
-          BOOTSTRAP_BASE_REFS = frozenset({'refs/heads/f6-gate-test'})
           API = os.environ.get("API", "https://api.github.com").rstrip("/")
           TOKEN = os.environ.get("GH_TOKEN", "")
           MODE = os.environ.get("MODE", "")
@@ -337,43 +334,18 @@ jobs:
               return out
 
 
-          def bootstrap_base_ref_allowlist():
-              """Policy-repo canon at pin (embedded BOOTSTRAP_BASE_REFS only). Never the PR head repo."""
-              return BOOTSTRAP_BASE_REFS
-
-
           def pr_base_treated_as_main(base_ref, default_branch):
-              """True when agent PR base is the repo default branch, `main`, or exact bootstrap ref."""
+              """True when agent PR base is the repo default branch or `main`."""
               if default_branch and base_ref == default_branch:
-                  return True, False
+                  return True
               if base_ref == DEFAULT_BASE_REF:
-                  return True, False
-              full = f"refs/heads/{base_ref}"
-              if full in bootstrap_base_ref_allowlist():
-                  return True, True
-              return False, False
-
-
-          def emit_bootstrap_base_warning(full_ref):
-              msg = (
-                  f"BOOTSTRAP BASE ALLOWANCE ACTIVE for {full_ref}; "
-                  "remove _bootstrap_ref_include before rollout")
-              print(f"::warning::{msg}")
-              summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
-              if summary_path:
-                  try:
-                      with open(summary_path, "a", encoding="utf-8") as f:
-                          f.write(f"## {msg}\n\n")
-                  except OSError:
-                      pass
+                  return True
+              return False
 
 
           def enforce_agent_pr_base_ref(base_ref, default_branch):
-              ok, bootstrap = pr_base_treated_as_main(base_ref, default_branch)
-              if not ok:
+              if not pr_base_treated_as_main(base_ref, default_branch):
                   fail("agent PRs must target main")
-              if bootstrap:
-                  emit_bootstrap_base_warning(f"refs/heads/{base_ref}")
 
 
           def ai_reviewers_from_cfg(cfg):
@@ -397,7 +369,7 @@ jobs:
                   if commit_node_agent_identity(c):
                       why.append(f"agent commit identity on {c.get('sha', '')[:12]}")
                       break
-              if pr_base_treated_as_main(base_ref, default_branch)[0]:
+              if pr_base_treated_as_main(base_ref, default_branch):
                   for c in commits:
                       sha = c.get("sha")
                       if sha and commit_came_from_agent_pr(sha):

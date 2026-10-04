@@ -19,7 +19,7 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 
 | Ruleset | Scope | Enforces | Bypass |
 |---|---|---|---|
-| `canon-agent-gates` | org → `fabricbloc`, `context`, `keyflo-session-issuer`; bootstrap: `refs/heads/f6-gate-test` only (`_bootstrap_ref_include`); after step 5 widen to `_post_rollout_ref_include` (`~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`) and clear `_bootstrap_ref_include` | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (agent merge bases: repo `default_branch` or `main` from the event; bootstrap base allowance embedded from `_bootstrap_ref_include` at pin) | none |
+| `canon-agent-gates` | org → `fabricbloc`, `context`, `keyflo-session-issuer`; `ref_name.include`: `~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**` (live retarget 2026-10-04 PT, ruleset **24445414**) | Required workflows `agent-denied-paths`, `agent-review-of-record` @ `ea32ff2` (agent merge bases: repo `default_branch` or `main`) | none |
 | `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8a5985` (see `pins.branch_name_guard_sha`) | none |
 | `main-required-ci` | fabricbloc `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR with 0 approvals and squash only, 9 contexts pinned to Actions 15368 | OrganizationAdmin (`pull_request`) |
 | `canon-branch-creation-restricted` (finding c B) | fabricbloc `refs/heads/**` minus main, `agent/**`, explicit GOV-0022 handle paths (`dependabot/**` blocked until configured); excludes must not cover all branches (`refs/heads/**`, `~ALL`, etc.) | Blocks branch **creation** for non-exempt names | none (disable ruleset) |
@@ -42,6 +42,7 @@ Recorded deltas so cursor-env / manual audits do not treat intentional live stat
 
 | Live ruleset | ID | Note |
 |---|---|---|
+| `canon-agent-gates` (org) | 24445414 | **Active**, no bypass. Repos: `fabricbloc`, `context`, `keyflo-session-issuer`. `ref_name.include` matches canon (four entries). Workflows pinned @ `ea32ff2b6f05b1a3635a764f7823ae4c4da129f0`. Retarget applied **2026-10-04 PT** (MadAgentPM). |
 | `main-required-ci` (fabricbloc) | 20436874 | **Require branches to be up to date before merging** is **OFF**, matching `canon.json` `strict_required_status_checks_policy: false`. The **six** required status check contexts are unchanged from the pre-toggle set. **Merge queue** is not available on GitHub Team for private repos (documented limitation; not in canon). |
 
 **Policy ownership:** Changes to org gate targeting (`TARGET_REPOS` in `agent-gates/embedded_gate.py`, `canon-agent-gates` `repository_name` in `canon.json`) are owned by **Warden** (FabricBloc tech-policy owner bot). Human CODEOWNERS review stays unchanged.

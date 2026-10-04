@@ -97,61 +97,10 @@ def main():
     gate_mutations = [
         ("Base check uses startswith('main') instead of exact main",
          lambda s: s.replace(
-             "    if base_ref == DEFAULT_BASE_REF:\n        return True, False",
-             "    if base_ref.startswith(\"main\"):\n        return True, base_ref != DEFAULT_BASE_REF",
+             "    if base_ref == DEFAULT_BASE_REF:\n        return True",
+             "    if base_ref.startswith(\"main\"):\n        return True",
          ),
          "test_mutation_base_check_startswith_main_would_miss_release"),
-        ("Bootstrap base uses prefix match instead of exact",
-         lambda s: s.replace(
-             "    if full in bootstrap_base_ref_allowlist():\n        return True, True",
-             "    allow = bootstrap_base_ref_allowlist()\n"
-             "    if any(full.startswith(x.rstrip(\"*\")) for x in allow):\n"
-             "        return True, True",
-         ),
-         "test_mutation_bootstrap_prefix_match_would_allow_near_miss"),
-        ("Bootstrap list read from PR head via contents API",
-         lambda s: s.replace(
-             "    return BOOTSTRAP_BASE_REFS\n",
-             "    text = base_text(\"rulesets/canon.json\", os.environ.get(\"EVENT_HEAD_SHA\", \"\"))\n"
-             "    if not text:\n        return frozenset()\n"
-             "    data = json.loads(text)\n"
-             "    for rs in data.get(\"organization_rulesets\") or []:\n"
-             "        if rs.get(\"name\") == \"canon-agent-gates\":\n"
-             "            raw = rs.get(\"_bootstrap_ref_include\") or []\n"
-             "            return frozenset(e for e in raw if isinstance(e, str))\n"
-             "    return frozenset()\n",
-             1,
-         ),
-         "test_mutation_bootstrap_reads_from_pr_head_repo"),
-        ("Bootstrap treats empty allowlist as allow-all",
-         lambda s: re.sub(
-             r"^BOOTSTRAP_BASE_REFS = frozenset\(\{.*\}\)\s*$",
-             "BOOTSTRAP_BASE_REFS = frozenset()",
-             s.replace(
-                 "    if full in bootstrap_base_ref_allowlist():\n        return True, True",
-                 "    allow = bootstrap_base_ref_allowlist()\n"
-                 "    if not allow:\n        return True, True\n"
-                 "    if full in allow:\n        return True, True",
-             ),
-             count=1,
-             flags=re.M,
-         ),
-         "test_mutation_bootstrap_empty_list_allows_all_bases"),
-        ("Bootstrap allowlist read from POLICY_CANON_PATH env file",
-         lambda s: s.replace(
-             "    return BOOTSTRAP_BASE_REFS\n",
-             "    path = os.environ.get(\"POLICY_CANON_PATH\", \"\").strip()\n"
-             "    if path:\n"
-             "        with open(path, encoding=\"utf-8\") as fp:\n"
-             "            data = json.load(fp)\n"
-             "        for rs in data.get(\"organization_rulesets\") or []:\n"
-             "            if rs.get(\"name\") == \"canon-agent-gates\":\n"
-             "                raw = rs.get(\"_bootstrap_ref_include\") or []\n"
-             "                return frozenset(e for e in raw if isinstance(e, str))\n"
-             "    return BOOTSTRAP_BASE_REFS\n",
-             1,
-         ),
-         "test_mutation_bootstrap_policy_canon_path_env_read"),
         ("Remove PR author leg from agent_identity_reasons",
          lambda s: re.sub(
              r'    if author_type == "Bot" or is_agent\(login=author, user_id=author_id\):\n'
@@ -216,12 +165,12 @@ def main():
 
     orig_validate = VALIDATE_CANON_PATH.read_text()
     validate_mutations = [
-        ("Bootstrap ref include exact check loosened to subset only",
+        ("Live ref include check loosened to subset only",
          lambda s: s.replace(
-             "        if inc_set != bootstrap_set:",
-             "        if bootstrap_set - inc_set:",
+             '        if list(inc) != list(LIVE_REF_INCLUDE):',
+             '        if set(LIVE_REF_INCLUDE) - set(inc):',
          ),
-         "test_mutation_validate_canon_bootstrap_include_subset_only"),
+         "test_mutation_validate_canon_live_ref_loosened"),
     ]
     for label, mut, test_name in validate_mutations:
         VALIDATE_CANON_PATH.write_text(mut(orig_validate))
