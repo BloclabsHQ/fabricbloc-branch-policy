@@ -39,6 +39,24 @@ def bootstrap_rollout_mutex_errors(canon):
     return errs
 
 
+def bootstrap_ref_include_exact_errors(canon):
+    errs = []
+    for rs in canon.get("organization_rulesets") or []:
+        if not isinstance(rs, dict) or rs.get("name") != "canon-agent-gates":
+            continue
+        bootstrap = rs.get("_bootstrap_ref_include") or []
+        if not bootstrap:
+            continue
+        bootstrap_set = set(bootstrap)
+        inc = (rs.get("conditions") or {}).get("ref_name", {}).get("include") or []
+        inc_set = set(inc)
+        if inc_set != bootstrap_set:
+            errs.append(
+                "canon-agent-gates: conditions.ref_name.include must equal "
+                "_bootstrap_ref_include exactly while bootstrap is non-empty")
+    return errs
+
+
 def main():
     api = json.load(open(sys.argv[1])) if len(sys.argv) > 1 else json.load(
         urllib.request.urlopen(URL, timeout=120))
@@ -46,7 +64,10 @@ def main():
     mutex_errs = bootstrap_rollout_mutex_errors(canon)
     for msg in mutex_errs:
         print(f"BAD bootstrap/rollout mutex {msg}")
-    bad = len(mutex_errs)
+    exact_errs = bootstrap_ref_include_exact_errors(canon)
+    for msg in exact_errs:
+        print(f"BAD bootstrap ref include {msg}")
+    bad = len(mutex_errs) + len(exact_errs)
     for path, items in (("/orgs/{org}/rulesets", canon["organization_rulesets"]),
                         ("/repos/{owner}/{repo}/rulesets", canon["repository_rulesets"])):
         sch = dict(api["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"])

@@ -309,41 +309,8 @@ jobs:
               return out
 
 
-          def _bootstrap_refs_from_canon_obj(canon):
-              if not isinstance(canon, dict):
-                  return None
-              rulesets = canon.get("organization_rulesets")
-              if not isinstance(rulesets, list):
-                  return None
-              gates = None
-              for rs in rulesets:
-                  if isinstance(rs, dict) and rs.get("name") == CANON_AGENT_GATES:
-                      gates = rs
-                      break
-              if gates is None:
-                  return frozenset()
-              raw = gates.get("_bootstrap_ref_include")
-              if raw is None:
-                  return frozenset()
-              if not isinstance(raw, list):
-                  return None
-              out = set()
-              for entry in raw:
-                  if isinstance(entry, str) and entry.startswith("refs/heads/"):
-                      out.add(entry)
-              return frozenset(out)
-
-
           def bootstrap_base_ref_allowlist():
-              """Policy-repo canon at pin (embedded constant or POLICY_CANON_PATH). Never the PR head repo."""
-              path = os.environ.get("POLICY_CANON_PATH", "").strip()
-              if path:
-                  try:
-                      with open(path, encoding="utf-8") as f:
-                          canon = json.load(f)
-                  except (OSError, ValueError, json.JSONDecodeError):
-                      return None
-                  return _bootstrap_refs_from_canon_obj(canon)
+              """Policy-repo canon at pin (embedded BOOTSTRAP_BASE_REFS only). Never the PR head repo."""
               return BOOTSTRAP_BASE_REFS
 
 
@@ -351,11 +318,8 @@ jobs:
               """True when agent PR base is main or an exact bootstrap refs/heads/* entry (case-sensitive)."""
               if base_ref == DEFAULT_BASE_REF:
                   return True, False
-              allow = bootstrap_base_ref_allowlist()
-              if allow is None:
-                  return False, False
               full = f"refs/heads/{base_ref}"
-              if full in allow:
+              if full in bootstrap_base_ref_allowlist():
                   return True, True
               return False, False
 

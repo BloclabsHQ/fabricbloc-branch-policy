@@ -176,13 +176,6 @@ def run(mode, repo="BloclabsHQ/fabricbloc", event_head=HEAD, gh_token="test", ex
     return p.returncode, p.stdout + p.stderr
 
 
-def policy_canon_env(canon_obj):
-    f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-    json.dump(canon_obj, f)
-    f.close()
-    return f.name, {"POLICY_CANON_PATH": f.name}
-
-
 def approve(login="Madgeniusblink", sha=HEAD, state="APPROVED", body=None, user_id=None):
     user = {"login": login}
     if user_id is not None:
@@ -266,7 +259,6 @@ def run_gate_with_patch(mode, patch_src, extra_env=None):
 
 
 def run_with_reviewer_bots(mode, bots, **kwargs):
-    import re
     pairs = ", ".join(repr((str(b[0]), int(b[1]))) for b in bots)
     body = embedded(mode)
     body = re.sub(
@@ -281,6 +273,30 @@ def run_with_reviewer_bots(mode, bots, **kwargs):
     env.update(kwargs.get("env", {}))
     p = subprocess.run([sys.executable, "-c", body], env=env, capture_output=True, text=True, timeout=30)
     return p.returncode, p.stdout + p.stderr
+
+
+def run_with_bootstrap_refs(mode, refs, **kwargs):
+    inner = ", ".join(repr(r) for r in sorted(refs))
+    line = f"BOOTSTRAP_BASE_REFS = frozenset({{{inner}}})"
+    body = embedded(mode)
+    body = re.sub(
+        r"^BOOTSTRAP_BASE_REFS = frozenset\(\{.*\}\)\s*$",
+        line,
+        body,
+        count=1,
+        flags=re.M,
+    )
+    env = dict(os.environ, MODE=mode, API=API, GH_TOKEN="test", REPO="BloclabsHQ/fabricbloc",
+               PR="7", EVENT_HEAD_SHA=HEAD)
+    env.update(kwargs.get("env", {}))
+    p = subprocess.run([sys.executable, "-c", body], env=env, capture_output=True, text=True, timeout=30)
+    return p.returncode, p.stdout + p.stderr
+
+
+def gate_ns_with_bootstrap(refs):
+    ns = load_gate_constants()
+    ns["BOOTSTRAP_BASE_REFS"] = frozenset(refs)
+    return ns
 
 
 AGENT = dict(ref="agent/autonomous/fix/x-i1-y", author="fabricbloc-agent-ops[bot]", atype="Bot",
@@ -632,51 +648,36 @@ class T(unittest.TestCase):
             self.assertEqual(code, 1, out)
             self.assertIn("agent PRs must target main", out)
 
-    def test_bootstrap_glob_entry_in_canon_does_not_allow(self):
+    def test_bootstrap_glob_entry_in_allowlist_does_not_allow(self):
+        setup(files=("docs/x.md",), base_ref="f6-gate-test", **AGENT)
+        code, out = run_with_bootstrap_refs(
+            "agent-denied-paths", ["refs/heads/f6-gate-test/**"])
+        self.assertEqual(code, 1, out)
+        self.assertIn("agent PRs must target main", out)
+
+    def test_bootstrap_empty_allowlist_restores_strict_main(self):
+        setup(files=("docs/x.md",), base_ref="f6-gate-test", **AGENT)
+        code, out = run_with_bootstrap_refs("agent-denied-paths", [])
+        self.assertEqual(code, 1, out)
+        self.assertIn("agent PRs must target main", out)
+        ns = gate_ns_with_bootstrap([])
+        ok, bootstrap = ns["pr_base_treated_as_main"]("main")
+        self.assertTrue(ok)
+        self.assertFalse(bootstrap)
+
+    def test_bootstrap_policy_canon_path_env_ignored(self):
         canon = copy.deepcopy(load_canon())
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
-        gates["_bootstrap_ref_include"] = ["refs/heads/f6-gate-test/**"]
-        path, extra = policy_canon_env(canon)
-        try:
-            setup(files=("docs/x.md",), base_ref="f6-gate-test", **AGENT)
-            code, out = run("agent-denied-paths", extra_env=extra)
-            self.assertEqual(code, 1, out)
-            self.assertIn("agent PRs must target main", out)
-        finally:
-            os.unlink(path)
-
-    def test_bootstrap_empty_include_restores_strict_main(self):
-        canon = copy.deepcopy(load_canon())
-        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
-        gates["_bootstrap_ref_include"] = []
-        path, extra = policy_canon_env(canon)
-        try:
-            setup(files=("docs/x.md",), base_ref="f6-gate-test", **AGENT)
-            code, out = run("agent-denied-paths", extra_env=extra)
-            self.assertEqual(code, 1, out)
-            self.assertIn("agent PRs must target main", out)
-        finally:
-            os.unlink(path)
-
-    def test_bootstrap_missing_include_restores_strict_main(self):
-        canon = copy.deepcopy(load_canon())
-        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
-        gates.pop("_bootstrap_ref_include", None)
-        path, extra = policy_canon_env(canon)
-        try:
-            setup(files=("docs/x.md",), base_ref="f6-gate-test", **AGENT)
-            code, out = run("agent-denied-paths", extra_env=extra)
-            self.assertEqual(code, 1, out)
-        finally:
-            os.unlink(path)
-
-    def test_bootstrap_unreadable_canon_fail_closed(self):
+        gates["_bootstrap_ref_include"] = ["refs/heads/release/x"]
         f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-        f.write("{not json")
+        json.dump(canon, f)
         f.close()
         try:
-            setup(files=("docs/x.md",), base_ref="f6-gate-test", **AGENT)
-            code, out = run("agent-denied-paths", extra_env={"POLICY_CANON_PATH": f.name})
+            setup(files=("docs/x.md",), base_ref="release/x", **AGENT)
+            code, out = run_with_bootstrap_refs(
+                "agent-denied-paths", ["refs/heads/f6-gate-test"],
+                env={"POLICY_CANON_PATH": f.name},
+            )
             self.assertEqual(code, 1, out)
             self.assertIn("agent PRs must target main", out)
         finally:
@@ -692,19 +693,7 @@ class T(unittest.TestCase):
         self.assertEqual(ns["BOOTSTRAP_BASE_REFS"], frozenset(expected))
 
     def test_validate_canon_bootstrap_rollout_mutex(self):
-        def bootstrap_rollout_mutex_errors(canon):
-            errs = []
-            for rs in canon.get("organization_rulesets") or []:
-                if not isinstance(rs, dict) or rs.get("name") != "canon-agent-gates":
-                    continue
-                bootstrap = rs.get("_bootstrap_ref_include") or []
-                if not bootstrap:
-                    continue
-                inc = (rs.get("conditions") or {}).get("ref_name", {}).get("include") or []
-                for marker in ("~DEFAULT_BRANCH", "refs/heads/main"):
-                    if marker in inc:
-                        errs.append(marker)
-            return errs
+        from validate_canon import bootstrap_rollout_mutex_errors
 
         canon = copy.deepcopy(load_canon())
         self.assertEqual(bootstrap_rollout_mutex_errors(canon), [])
@@ -712,6 +701,37 @@ class T(unittest.TestCase):
         gates["conditions"]["ref_name"]["include"].append("~DEFAULT_BRANCH")
         errs = bootstrap_rollout_mutex_errors(canon)
         self.assertTrue(errs)
+
+    def test_validate_canon_bootstrap_ref_include_exact_pass(self):
+        from validate_canon import bootstrap_ref_include_exact_errors
+
+        canon = copy.deepcopy(load_canon())
+        self.assertEqual(bootstrap_ref_include_exact_errors(canon), [])
+
+    def test_validate_canon_bootstrap_ref_include_exact_rejects(self):
+        from validate_canon import bootstrap_ref_include_exact_errors
+
+        canon = copy.deepcopy(load_canon())
+        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        cases = (
+            "refs/heads/**",
+            "~ALL",
+            "~DEFAULT_BRANCH",
+            "refs/heads/main",
+            "refs/heads/release/**",
+            "refs/heads/prod/**",
+            "refs/heads/stray-branch",
+        )
+        for extra in cases:
+            with self.subTest(extra=extra):
+                c = copy.deepcopy(canon)
+                g = next(r for r in c["organization_rulesets"] if r["name"] == "canon-agent-gates")
+                g["conditions"]["ref_name"]["include"] = list(g["_bootstrap_ref_include"]) + [extra]
+                self.assertTrue(bootstrap_ref_include_exact_errors(c))
+        c = copy.deepcopy(canon)
+        g = next(r for r in c["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        g["conditions"]["ref_name"]["include"] = ["refs/heads/f6-gate-test", "refs/heads/other"]
+        self.assertTrue(bootstrap_ref_include_exact_errors(c))
 
     def test_finding_c_human_pr_base_release_not_failed_by_base_rule(self):
         setup(ref="madgeniusblink/feat/x", files=("docs/x.md",), base_ref="release/x")
@@ -954,8 +974,10 @@ class T(unittest.TestCase):
 
         def patch(body):
             return body.replace(
-                "    if full in allow:\n        return True, True",
-                "    if any(full.startswith(x.rstrip(\"*\")) for x in allow):\n        return True, True",
+                "    if full in bootstrap_base_ref_allowlist():\n        return True, True",
+                "    allow = bootstrap_base_ref_allowlist()\n"
+                "    if any(full.startswith(x.rstrip(\"*\")) for x in allow):\n"
+                "        return True, True",
             )
 
         setup(files=("docs/x.md",), base_ref="f6-gate-test-x", **AGENT)
@@ -981,7 +1003,12 @@ class T(unittest.TestCase):
                 "    return BOOTSTRAP_BASE_REFS\n",
                 "    text = base_text(\"rulesets/canon.json\", os.environ.get(\"EVENT_HEAD_SHA\", \"\"))\n"
                 "    if not text:\n        return frozenset()\n"
-                "    return _bootstrap_refs_from_canon_obj(json.loads(text))\n",
+                "    data = json.loads(text)\n"
+                "    for rs in data.get(\"organization_rulesets\") or []:\n"
+                "        if rs.get(\"name\") == \"canon-agent-gates\":\n"
+                "            raw = rs.get(\"_bootstrap_ref_include\") or []\n"
+                "            return frozenset(e for e in raw if isinstance(e, str))\n"
+                "    return frozenset()\n",
                 1,
             )
 
@@ -992,26 +1019,85 @@ class T(unittest.TestCase):
         self.assertNotIn("agent PRs must target main", out)
 
     def test_mutation_bootstrap_empty_list_allows_all_bases(self):
+        setup(files=("docs/x.md",), base_ref="release/x", **AGENT)
+        code, out = run_with_bootstrap_refs("agent-denied-paths", [])
+        self.assertEqual(code, 1, out)
+
+        def patch(body):
+            return body.replace(
+                "    if full in bootstrap_base_ref_allowlist():\n        return True, True",
+                "    allow = bootstrap_base_ref_allowlist()\n"
+                "    if not allow:\n        return True, True\n"
+                "    if full in allow:\n        return True, True",
+            )
+
+        def patch_with_empty(body):
+            body = patch(body)
+            return re.sub(
+                r"^BOOTSTRAP_BASE_REFS = frozenset\(\{.*\}\)\s*$",
+                "BOOTSTRAP_BASE_REFS = frozenset()",
+                body,
+                count=1,
+                flags=re.M,
+            )
+
+        setup(files=("docs/x.md",), base_ref="release/x", **AGENT)
+        code, out = run_gate_with_patch("agent-denied-paths", patch_with_empty)
+        self.assertEqual(code, 0, out)
+
+    def test_mutation_bootstrap_policy_canon_path_env_read(self):
         canon = copy.deepcopy(load_canon())
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
-        gates["_bootstrap_ref_include"] = []
-        path, extra = policy_canon_env(canon)
+        gates["_bootstrap_ref_include"] = ["refs/heads/release/x"]
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(canon, f)
+        f.close()
         try:
             setup(files=("docs/x.md",), base_ref="release/x", **AGENT)
-            code, out = run("agent-denied-paths", extra_env=extra)
+            code, out = run("agent-denied-paths", extra_env={"POLICY_CANON_PATH": f.name})
             self.assertEqual(code, 1, out)
 
             def patch(body):
                 return body.replace(
-                    "    if allow is None:\n        return False, False",
-                    "    if allow is None:\n        return False, False\n    if not allow:\n        return True, True",
+                    "    return BOOTSTRAP_BASE_REFS\n",
+                    "    path = os.environ.get(\"POLICY_CANON_PATH\", \"\").strip()\n"
+                    "    if path:\n"
+                    "        with open(path, encoding=\"utf-8\") as fp:\n"
+                    "            data = json.load(fp)\n"
+                    "        for rs in data.get(\"organization_rulesets\") or []:\n"
+                    "            if rs.get(\"name\") == \"canon-agent-gates\":\n"
+                    "                raw = rs.get(\"_bootstrap_ref_include\") or []\n"
+                    "                return frozenset(e for e in raw if isinstance(e, str))\n"
+                    "    return BOOTSTRAP_BASE_REFS\n",
+                    1,
                 )
 
             setup(files=("docs/x.md",), base_ref="release/x", **AGENT)
-            code, out = run_gate_with_patch("agent-denied-paths", patch, extra_env=extra)
+            code, out = run_gate_with_patch(
+                "agent-denied-paths", patch, extra_env={"POLICY_CANON_PATH": f.name})
             self.assertEqual(code, 0, out)
+            self.assertNotIn("agent PRs must target main", out)
         finally:
-            os.unlink(path)
+            os.unlink(f.name)
+
+    def test_mutation_validate_canon_bootstrap_include_subset_only(self):
+        from validate_canon import bootstrap_ref_include_exact_errors
+
+        canon = copy.deepcopy(load_canon())
+        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        gates["conditions"]["ref_name"]["include"].append("refs/heads/stray")
+        self.assertTrue(bootstrap_ref_include_exact_errors(canon))
+
+        def patch(src):
+            return src.replace(
+                "        if inc_set != bootstrap_set:",
+                "        if bootstrap_set - inc_set:",
+            )
+
+        ns = {"__file__": str(ROOT / "agent-gates" / "validate_canon.py")}
+        src = (ROOT / "agent-gates" / "validate_canon.py").read_text()
+        exec(patch(src).split("def main():")[0], ns)  # noqa: S102
+        self.assertFalse(ns["bootstrap_ref_include_exact_errors"](canon))
 
     def test_mutation_removing_author_leg_misses_base_rule(self):
         setup(ref="madgeniusblink/feat/x", author="fabricbloc-agent-ops[bot]", atype="Bot",

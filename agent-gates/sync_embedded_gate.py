@@ -29,7 +29,7 @@ def refresh_embedded_bootstrap_constant():
     line = f"BOOTSTRAP_BASE_REFS = frozenset({{{inner}}})"
     text = GATE_PATH.read_text()
     new_text, n = re.subn(
-        r"^BOOTSTRAP_BASE_REFS = frozenset\(\{.*\}\)\s*$",
+        r"^BOOTSTRAP_BASE_REFS = frozenset\((?:\{.*\})?\)\s*$",
         line,
         text,
         count=1,
