@@ -161,6 +161,38 @@ class LiveAndCliTests(unittest.TestCase):
         err = urllib.error.HTTPError(ENVS, 403, "Forbidden", {}, None)
         self.assertEqual(drift(ed.live_findings(FakeAPI({ENVS: err}), "t", POLICY)), [])
 
+    def test_http_json_parses_urlopen_response(self) -> None:
+        payload = {"environments": []}
+
+        class Resp:
+            def read(self):
+                return json.dumps(payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        with mock.patch.object(ed.urllib.request, "urlopen", return_value=Resp()) as urlopen:
+            self.assertEqual(ed.http_json("https://example.test/envs", {"Accept": "application/json"}), payload)
+        urlopen.assert_called_once()
+
+    def test_live_run_without_token_warns_and_exits_zero(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code, rep = ed.run(["--live"], env={})
+        self.assertEqual((code, rep), (0, None))
+        self.assertIn("::warning::", buf.getvalue())
+        self.assertIn("GH_AUDIT_TOKEN", buf.getvalue())
+
+    def test_live_run_without_token_strict_live_fails(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code, rep = ed.run(["--live", "--strict-live"], env={})
+        self.assertEqual((code, rep), (1, None))
+        self.assertIn("::warning::", buf.getvalue())
+
     def test_cli_offline_exit_codes(self) -> None:
         bp = f"agent-ops={FIX / 'branch-policies.main.json'}"
         code, rep = ed.run(["--environments-json", str(FIX / "environments.clean.json"), "--branch-policies", bp])
