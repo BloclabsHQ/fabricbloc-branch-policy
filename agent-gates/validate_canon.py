@@ -13,6 +13,13 @@ import jsonschema
 URL = "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json"
 CANON_PATH = Path(__file__).resolve().parents[1] / "rulesets" / "canon.json"
 
+LIVE_REF_INCLUDE = (
+    "~DEFAULT_BRANCH",
+    "refs/heads/main",
+    "refs/heads/release/**",
+    "refs/heads/prod/**",
+)
+
 
 def strip(o):
     if isinstance(o, dict):
@@ -22,38 +29,20 @@ def strip(o):
     return o
 
 
-def bootstrap_rollout_mutex_errors(canon):
+def agent_gates_live_ref_errors(canon):
     errs = []
     for rs in canon.get("organization_rulesets") or []:
         if not isinstance(rs, dict) or rs.get("name") != "canon-agent-gates":
             continue
-        bootstrap = rs.get("_bootstrap_ref_include") or []
-        if not bootstrap:
-            continue
+        if rs.get("_bootstrap_ref_include"):
+            errs.append("canon-agent-gates: _bootstrap_ref_include must be absent after rollout")
+        if rs.get("_post_rollout_ref_include"):
+            errs.append("canon-agent-gates: _post_rollout_ref_include must be absent; use conditions.ref_name.include")
         inc = (rs.get("conditions") or {}).get("ref_name", {}).get("include") or []
-        for marker in ("~DEFAULT_BRANCH", "refs/heads/main"):
-            if marker in inc:
-                errs.append(
-                    f"canon-agent-gates: _bootstrap_ref_include must be empty when "
-                    f"ref_name.include contains {marker} (rollout state)")
-    return errs
-
-
-def bootstrap_ref_include_exact_errors(canon):
-    errs = []
-    for rs in canon.get("organization_rulesets") or []:
-        if not isinstance(rs, dict) or rs.get("name") != "canon-agent-gates":
-            continue
-        bootstrap = rs.get("_bootstrap_ref_include") or []
-        if not bootstrap:
-            continue
-        bootstrap_set = set(bootstrap)
-        inc = (rs.get("conditions") or {}).get("ref_name", {}).get("include") or []
-        inc_set = set(inc)
-        if inc_set != bootstrap_set:
+        if list(inc) != list(LIVE_REF_INCLUDE):
             errs.append(
-                "canon-agent-gates: conditions.ref_name.include must equal "
-                "_bootstrap_ref_include exactly while bootstrap is non-empty")
+                "canon-agent-gates: conditions.ref_name.include must match live post-rollout ref_include"
+            )
     return errs
 
 
@@ -61,13 +50,10 @@ def main():
     api = json.load(open(sys.argv[1])) if len(sys.argv) > 1 else json.load(
         urllib.request.urlopen(URL, timeout=120))
     canon = json.loads(CANON_PATH.read_text())
-    mutex_errs = bootstrap_rollout_mutex_errors(canon)
-    for msg in mutex_errs:
-        print(f"BAD bootstrap/rollout mutex {msg}")
-    exact_errs = bootstrap_ref_include_exact_errors(canon)
-    for msg in exact_errs:
-        print(f"BAD bootstrap ref include {msg}")
-    bad = len(mutex_errs) + len(exact_errs)
+    ref_errs = agent_gates_live_ref_errors(canon)
+    for msg in ref_errs:
+        print(f"BAD live ref include {msg}")
+    bad = len(ref_errs)
     for path, items in (("/orgs/{org}/rulesets", canon["organization_rulesets"]),
                         ("/repos/{owner}/{repo}/rulesets", canon["repository_rulesets"])):
         sch = dict(api["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"])
