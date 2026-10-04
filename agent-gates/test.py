@@ -702,6 +702,13 @@ class T(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("agent PRs must target main", out)
 
+    def test_fabricbloc_default_main_agent_base_release_rejected(self):
+        setup(files=("docs/x.md",), base_ref="release/x", repo="BloclabsHQ/fabricbloc", **AGENT)
+        env = {"REPO_DEFAULT_BRANCH": "main"}
+        code, out = run("agent-denied-paths", repo="BloclabsHQ/fabricbloc", extra_env=env)
+        self.assertEqual(code, 1, out)
+        self.assertIn("agent PRs must target main", out)
+
     def test_context_default_main_agent_base_dev_rejected(self):
         setup(files=("docs/x.md",), base_ref="dev", repo="BloclabsHQ/context", **AGENT)
         code, out = run("agent-denied-paths", repo="BloclabsHQ/context")
@@ -820,11 +827,19 @@ class T(unittest.TestCase):
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         self.assertEqual(gates.get("bypass_actors"), [])
 
-    def test_canon_agent_gates_post_rollout_ref_include_default_and_main(self):
+    def test_canon_agent_gates_post_rollout_ref_include_rollout_refs(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         inc = gates.get("_post_rollout_ref_include") or gates["conditions"]["ref_name"]["include"]
-        self.assertEqual(set(inc), {"~DEFAULT_BRANCH", "refs/heads/main"})
+        self.assertEqual(
+            inc,
+            [
+                "~DEFAULT_BRANCH",
+                "refs/heads/main",
+                "refs/heads/release/**",
+                "refs/heads/prod/**",
+            ],
+        )
 
     def test_canon_agent_gates_repository_name_matches_target_repos(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
