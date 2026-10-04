@@ -246,11 +246,6 @@ def process_pr(token, slack_token, repo, pr_number, *, event_action=None, sweep=
     if draft:
         return
 
-    ready_sha = marker.get("ready_sha")
-    if ready_sha == head_sha:
-        print(f"ready-sha already {head_sha[:7]}")
-        return
-
     contexts = required_contexts(repo, base_ref)
     green, reason = checks_green(repo, head_sha, contexts)
     if not green:
@@ -259,6 +254,14 @@ def process_pr(token, slack_token, repo, pr_number, *, event_action=None, sweep=
 
     if not thread_ts:
         print("READY skipped: no thread (READY never opens root)")
+        return
+
+    # Re-read marker after checks (C1-2: avoid duplicate READY on concurrent runs).
+    comments = paginate(f"/repos/{repo}/issues/{pr_number}/comments", token=token)
+    marker_c, marker = marker_comment(comments, authors)
+    thread_ts = marker.get("thread_ts") or thread_ts
+    if marker.get("ready_sha") == head_sha:
+        print(f"ready-sha already {head_sha[:7]} (post-check re-read)")
         return
 
     msg = format_ready(pr, repo)
