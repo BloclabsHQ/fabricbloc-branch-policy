@@ -40,13 +40,15 @@
         },
         "ref_name": {
           "include": [
-            "~DEFAULT_BRANCH"
+            "~DEFAULT_BRANCH",
+            "refs/heads/release/**",
+            "refs/heads/prod/**"
           ],
           "exclude": []
         }
       },
       "bypass_actors": [],
-      "_bypass_note": "Empty on purpose (decision F6-D2). The gates pass at once for GOV-0022 human PRs, so nobody needs a bypass. Break-glass = an org owner sets enforcement to disabled (audit-logged). An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
+      "_bypass_note": "Empty on purpose (decision F6-D2). No standing bypass on canon-agent-gates: break-glass is an org owner sets enforcement to Disabled (org audit log); fabricbloc cursor-env drift opens an issue while disabled. The gates pass at once for GOV-0022 human PRs to main, so nobody needs a bypass. An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
       "rules": [
         {
           "type": "workflows",
@@ -200,6 +202,68 @@
               }
             ]
           }
+        }
+      ]
+    },
+    {
+      "_repository": "fabricbloc",
+      "name": "canon-branch-creation-restricted",
+      "_finding": "Finding (c) layer B. Stops agents from creating a fresh ungated base branch (for example f6-gate-retarget-probe).",
+      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). dependabot/** is blocked until fabricbloc has dependabot.yml and a ruling re-adds the exemption. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "refs/heads/**"
+          ],
+          "exclude": [
+            "refs/heads/main",
+            "refs/heads/agent/**",
+            "refs/heads/madgeniusblink/feat/**",
+            "refs/heads/madgeniusblink/fix/**",
+            "refs/heads/madgeniusblink/chore/**",
+            "refs/heads/madgeniusblink/docs/**",
+            "refs/heads/madgeniusblink/refactor/**",
+            "refs/heads/madgeniusblink/test/**",
+            "refs/heads/madgeniusblink/ci/**",
+            "refs/heads/madgeniusblink/perf/**",
+            "refs/heads/madgeniusblink/revert/**",
+            "refs/heads/madgeniusblink/build/**",
+            "refs/heads/madgeniusblink/style/**"
+          ]
+        }
+      },
+      "bypass_actors": [],
+      "rules": [
+        {
+          "type": "creation"
+        }
+      ]
+    },
+    {
+      "_repository": "fabricbloc",
+      "name": "canon-deploy-branches-human-only",
+      "_finding": "Finding (c). release/** and prod/** creation and direct updates are human-only (org admin break-glass).",
+      "_comment": "release/** and prod/** creation and direct updates are human-only. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "refs/heads/release/**",
+            "refs/heads/prod/**"
+          ],
+          "exclude": []
+        }
+      },
+      "bypass_actors": [],
+      "rules": [
+        {
+          "type": "creation"
+        },
+        {
+          "type": "update"
         }
       ]
     },

@@ -15,14 +15,15 @@
 # ai_reviewers may satisfy review-of-record but never qualify for the human
 # attended-skip (GOV-0022 handle branch) even on a matching ref.
 #
-# Rulesets run this only on pull_request opened/synchronize/reopened; a review
-# does NOT re-trigger it. After approving, re-run the failed check (UI
+# Rulesets run on opened/synchronize/reopened/edited (edited re-runs after base
+# retarget). A review does NOT re-trigger it. After approving, re-run the failed check (UI
 # "Re-run failed jobs") or let fabricbloc's agent-review-rerun.yml helper do it.
 # The helper can only re-run this pinned workflow; it cannot make it pass.
 name: agent-review-of-record
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -57,6 +58,7 @@ jobs:
 
           SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
           TARGET_REPOS = {"BloclabsHQ/fabricbloc"}
+          DEFAULT_BASE_REF = "main"
           MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
           ENGINE_CONFIG = "agents/runtime/engine/config.yaml"
           # Floor: applies even if a later human PR thins the base manifest.
@@ -68,7 +70,21 @@ jobs:
           INCLUDE_PROPOSED = False  # flip to True (and re-pin) once FOUNDER-DECISIONS Q9 = yes
           AGENT_USER_IDS = {199161495}
           AGENT_LOGINS = {"cursoragent"}
-          AGENT_EMAILS = {"cursoragent@cursor.com", "199161495+cursoragent@users.noreply.github.com"}
+          AGENT_EMAILS = {
+              "cursoragent@cursor.com",
+              "199161495+cursoragent@users.noreply.github.com",
+          }
+          # Co-authored-by: display names treated as agent identity (email still checked via is_agent).
+          AGENT_COAUTHOR_NAMES = frozenset({
+              "cursor agent", "cursoragent", "cursor", "chatgpt codex connector",
+              "chatgpt-codex-connector[bot]", "claude", "claude[bot]",
+          })
+          COAUTHOR_TRAILER_RE = re.compile(r"^Co-authored-by:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
+          # GOV-0022 human handles (manifest operators.members_expected), lowercase GitHub logins.
+          GOV_HUMAN_HANDLES = ("madgeniusblink",)
+          HUMAN_BRANCH_TYPES = (
+              "feat", "fix", "chore", "docs", "refactor", "test", "ci", "perf", "revert", "build", "style",
+          )
           # Dedicated reviewer GitHub App (fabricbloc-reviewer). Cris fills after App creation:
           #   REVIEWER_APP_BOTS = {("fabricbloc-reviewer[bot]", <id from GET /users/fabricbloc-reviewer%5Bbot%5D>)}
           # Empty until then: no App approval can count (fail closed). Re-pin ruleset SHA after change.
@@ -78,6 +94,7 @@ jobs:
           HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
           MAX_FILES = 3000   # pulls/{n}/files hard limit
           MAX_COMMITS = 250  # pulls/{n}/commits hard limit
+          MAX_COMMIT_PULLS = 500  # commits/{sha}/pulls hard limit
 
           API = os.environ.get("API", "https://api.github.com").rstrip("/")
           TOKEN = os.environ.get("GH_TOKEN", "")
@@ -159,6 +176,70 @@ jobs:
               return e in AGENT_EMAILS or e.endswith("[bot]@users.noreply.github.com")
 
 
+          def _coauthor_trailer_agent(trailer):
+              text = (trailer or "").strip()
+              if not text:
+                  return False
+              email = text
+              name = ""
+              if "<" in text and text.endswith(">"):
+                  name, _, email = text.partition("<")
+                  name = name.strip()
+                  email = email.rstrip(">").strip()
+              elif "@" in text:
+                  name = text.split("@", 1)[0].strip()
+              if is_agent(email=email):
+                  return True
+              return name.lower() in AGENT_COAUTHOR_NAMES
+
+
+          def commit_message_agent_trailers(message):
+              if not message:
+                  return False
+              for trailer in COAUTHOR_TRAILER_RE.findall(message):
+                  if _coauthor_trailer_agent(trailer):
+                      return True
+              return False
+
+
+          def commit_node_agent_identity(c):
+              inner = c.get("commit") or {}
+              if commit_message_agent_trailers(inner.get("message")):
+                  return True
+              for top, key in (("author", "author"), ("committer", "committer")):
+                  node = c.get(top) or {}
+                  login = node.get("login")
+                  uid = node.get("id")
+                  email = (inner.get(key) or {}).get("email")
+                  if is_agent(login=login, email=email, user_id=uid):
+                      return True
+              return False
+
+
+          def pull_is_agent_provenance(pr):
+              head_ref = ((pr.get("head") or {}).get("ref") or "").lower()
+              if head_ref.startswith("agent/"):
+                  return True
+              user = pr.get("user") or {}
+              return is_agent(
+                  login=user.get("login"),
+                  user_id=user.get("id"),
+                  email=None,
+              ) or user.get("type") == "Bot"
+
+
+          def commit_came_from_agent_pr(commit_sha):
+              path = f"/repos/{REPO}/commits/{commit_sha}/pulls"
+              pulls = paginate(path, MAX_COMMIT_PULLS)
+              for p in pulls:
+                  if not isinstance(p, dict):
+                      fail(f"unexpected API shape for commits/{commit_sha[:12]}/pulls entry")
+                  head = p.get("head")
+                  if not isinstance(head, dict) or "ref" not in head:
+                      fail(f"commits/{commit_sha[:12]}/pulls entry missing head.ref; failing closed")
+              return any(pull_is_agent_provenance(p) for p in pulls)
+
+
           def _parse_flow_list_items(inner):
               """Split flow-list inner text into items (unquoted, single- or double-quoted)."""
               items = []
@@ -232,21 +313,33 @@ jobs:
               return parsed
 
 
-          def gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_reviewers, reviewer_bots):
+          def agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref):
               why = []
               if head_ref.lower().startswith("agent/"):
                   why.append("agent/** head ref")
               if author_type == "Bot" or is_agent(login=author, user_id=author_id):
                   why.append(f"agent PR author {author}")
               for c in commits:
-                  inner = c.get("commit") or {}
-                  for top, key in (("author", "author"), ("committer", "committer")):
-                      node = c.get(top) or {}
-                      login = node.get("login")
-                      uid = node.get("id")
-                      email = (inner.get(key) or {}).get("email")
-                      if is_agent(login=login, email=email, user_id=uid):
-                          why.append(f"agent commit identity {login or email} on {c.get('sha', '')[:12]}")
+                  if commit_node_agent_identity(c):
+                      why.append(f"agent commit identity on {c.get('sha', '')[:12]}")
+                      break
+              if base_ref == DEFAULT_BASE_REF:
+                  for c in commits:
+                      sha = c.get("sha")
+                      if sha and commit_came_from_agent_pr(sha):
+                          why.append(f"commit {sha[:12]} came from an agent PR (commits/pulls)")
+                          break
+              return why
+
+
+          def agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref):
+              """Agent work: head ref, PR author, commits, Co-authored-by, or agent PR provenance on main."""
+              return bool(agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref))
+
+
+          def gate_applies(head_ref, author, author_type, author_id, commits, base_ref,
+                           humans, ai_reviewers, reviewer_bots):
+              why = agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref)
               if why:
                   return True, why
               if is_reviewer_app(author, author_id, reviewer_bots):
@@ -330,6 +423,7 @@ jobs:
               if event_head and event_head != head:
                   fail(f"stale run: event head {event_head[:12]} != live head {head[:12]}; the newer push has its own run")
               head_ref = pr["head"]["ref"]
+              base_ref = pr["base"]["ref"]
               author = (pr.get("user") or {}).get("login") or ""
               author_type = (pr.get("user") or {}).get("type") or ""
               author_id = (pr.get("user") or {}).get("id")
@@ -343,7 +437,12 @@ jobs:
               commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS)
               if len(commits) != reported_commits:
                   fail(f"commit count mismatch (PR says {reported_commits}, listed {len(commits)})")
-              applies, why = gate_applies(head_ref, author, author_type, author_id, commits, humans, ai_rev, reviewer_bots)
+              if agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref):
+                  if base_ref != DEFAULT_BASE_REF:
+                      fail("agent PRs must target main")
+              applies, why = gate_applies(
+                  head_ref, author, author_type, author_id, commits, base_ref,
+                  humans, ai_rev, reviewer_bots)
               if not applies:
                   print(f"{MODE}: not gated ({why[0]}); human merge authority applies.")
                   return

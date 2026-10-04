@@ -23,11 +23,11 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 
 | Path | What it is |
 |---|---|
-| `rulesets/canon.json` | Format v2. Declares every ruleset: 2 **org** rulesets (`canon-agent-gates`, optional `canon-branch-name-guard-pinned`) and 6 **repo** rulesets (`main-required-ci`, `canon-agent-branches`, `canon-provider-branches-blocked` Q12, `canon-autonomous-branch-creation` Q16, `canon-push-protected-paths` Q14, `policy-main-protected` for this repo). All 8 bodies validate against GitHub's published OpenAPI schema (`agent-gates/validate_canon.py`). |
+| `rulesets/canon.json` | Format v2. Declares every ruleset: 2 **org** rulesets (`canon-agent-gates`, optional `canon-branch-name-guard-pinned`) and 8 **repo** rulesets on fabricbloc (`main-required-ci`, `canon-branch-creation-restricted`, `canon-deploy-branches-human-only`, `canon-agent-branches`, `canon-provider-branches-blocked` Q12, `canon-autonomous-branch-creation` Q16, `canon-push-protected-paths` Q14, plus `policy-main-protected` on this repo). All 10 bodies validate against GitHub's published OpenAPI schema (`agent-gates/validate_canon.py`). |
 | `rulesets/README.md` | File format and apply rules |
 | `.github/workflows/agent-denied-paths.yml` | Pinned gate. Reads the changed files via `GET /pulls/{n}/files` and the denied list from the **base** commit via the contents API. No checkout, no PR code. |
 | `.github/workflows/agent-review-of-record.yml` | Pinned gate. Requires an independent, allowlisted APPROVE at the exact live head. API only. |
-| `agent-gates/test.py` | Contract tests against a local fake API (including K7c/K7d Cursor identity cases and ai_reviewer rules), the F6 case (agent PR edits the gate to `exit 0` → still fails), byte-identical embedded gate logic, no checkout, and required gate workflows (`agent-denied-paths`, `agent-review-of-record`, `branch-name-guard`) pinned to `runs-on: ubuntu-latest` only (no missing `runs-on`, no `uses:` jobs). |
+| `agent-gates/test.py` | Contract tests against a local fake API (including K7c/K7d Cursor identity cases and ai_reviewer rules), finding (c) base-ref gate tests, canon.json assertions (no bypass on `canon-agent-gates`, Q14 workflow paths, no `~ALL`), the F6 case (agent PR edits the gate to `exit 0` → still fails), byte-identical embedded gate logic, no checkout, and required gate workflows (`agent-denied-paths`, `agent-review-of-record`, `branch-name-guard`) pinned to `runs-on: ubuntu-latest` only (no missing `runs-on`, no `uses:` jobs). |
 | `agent-gates/embedded_gate.py` | Canonical gate script; `sync_embedded_gate.py` copies it into both workflow heredocs. |
 | `agent-gates/validate_canon.py` | Validates `canon.json` bodies against the GitHub OpenAPI description |
 | `fabricbloc-side/.github/workflows/agent-review-rerun.yml` | Optional helper for fabricbloc: re-runs the pinned review check after a review. Convenience only; it can't make the check pass. |
@@ -37,6 +37,35 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 ## Threat model
 
 **Actors:** Cursor cloud agents (attended `agent/session/**` work, and engine `agent/autonomous/**` work dispatched by fabricbloc-agent-ops); any other App or PAT that can push to fabricbloc. **Assets:** `main` of fabricbloc, repo and org Actions secrets, and the gates themselves. **Trusted:** org owners; main of `fabricbloc-branch-policy` *at a pinned SHA*; main of fabricbloc *as base* (already gated).
+
+### Finding (c): retarget gap closed
+
+**Problem:** With `canon-agent-gates` scoped only to `~DEFAULT_BRANCH`, an agent PR **retargeted** to a fresh ungated base branch dropped the pinned org workflows — merge could bypass identity and denied-path checks.
+
+**Layer C (gate + org scope):** `main` is the only merge target agents may use. The pinned gate fails closed when the PR carries agent identity and `base.ref != main` (`agent PRs must target main`). Agent identity includes: **`agent/**` head ref** (regardless of commit author); PR author or any commit author/committer matching the pinned agent list; **`Co-authored-by:`** trailers with agent emails or known agent display names; and for PRs **to `main`**, any commit whose associated pull requests (`GET /commits/{sha}/pulls`) include an **`agent/**` head** or agent PR author (covers squash merges authored as a human after agent work). Org ruleset `canon-agent-gates` also targets `refs/heads/release/**` and `refs/heads/prod/**`. A follow-up human PR to `main` is **not** exempt merely because squash commits show a human author.
+
+**Layer B (`canon-branch-creation-restricted`):** Repo ruleset on fabricbloc blocks **creation** of branches outside `main`, `agent/**`, and explicit GOV-0022 paths `refs/heads/<handle>/<type>/**` for each handle in `GOV_HUMAN_HANDLES` in `embedded_gate.py` (sourced from fabricbloc manifest `operators.members_expected` / GOV-0022 — today **`madgeniusblink`** only, not `refs/heads/*/<type>/**`). `dependabot/**` is **blocked** until fabricbloc has a `dependabot.yml` and a ruling adds the exemption back. Scoped with `refs/heads/**` plus excludes (this policy file never uses `~ALL`). **No standing bypass** — break-glass: an org owner sets the ruleset to **Disabled** (audit log).
+
+**Deploy branches (`canon-deploy-branches-human-only`):** `refs/heads/release/**` and `refs/heads/prod/**` **creation** and **update** are blocked with **no standing bypass** (same break-glass: disable the ruleset).
+
+**Break-glass (rulesets B and deploy, and org gates):** There is **no** standing bypass on `canon-agent-gates`, `canon-branch-creation-restricted`, or `canon-deploy-branches-human-only`. An org owner sets the relevant ruleset to **Disabled** (org audit log). While `canon-agent-gates` is disabled, fabricbloc `cursor-env` drift should open an issue.
+
+**Residual risk:** Deliberate human merge of agent work outside the detection above (for example rewriting history without linked PR metadata) remains a human accountability path, mitigated by PR template and org audit.
+
+**Branch prefix policy (fabricbloc, finding c inventory):**
+
+| Prefix / pattern | Creation | Rationale |
+|---|---|---|
+| `agent/**` | Allowed (exempt from creation-restricted) | Canonical agent work; gated by org workflows on merge targets |
+| `madgeniusblink/<type>/**` | Allowed | GOV-0022 human handle(s) from manifest / GOV-0022 |
+| `dependabot/**` | Blocked (creation-restricted) | No `dependabot.yml` in fabricbloc yet; any actor could spoof the prefix — re-allow via ruleset exclude after Dependabot is configured |
+| `cursor/**`, `codex/**`, `claude/**`, `qwen/**` | Blocked (`canon-provider-branches-blocked`, Q12) | Agents use `agent/**`, not provider-default prefixes |
+| `workboard/<hash>` | Blocked (creation-restricted) | Ephemeral workboard heads from automation; not a human handle or `agent/**` — use `agent/**` or a GOV-0022 handle branch |
+| `chore/index-regen-*` (legacy) | Blocked unless renamed | fabricbloc `index-regen.yml` must push `agent/autonomous/chore/index-regen-<run_id>` instead (see PR body; not edited here if workflow lives only in fabricbloc) |
+
+**M6 step (ii) retarget stale green:** Pinned gate workflows now declare `pull_request` type **`edited`** so changing the PR base re-runs the gate (contract test `test_gate_workflows_rerun_on_pull_request_edited`). After re-pin, retargeting an agent PR from `main` to `release/**` should re-run and stay red.
+
+**Reviewer App key:** The `fabricbloc-reviewer` GitHub App private key rotates every **180 days** (1Password); re-pin the gate SHA after any `REVIEWER_APP_BOTS` change.
 
 | # | Attack | Status before this draft |
 |---|---|---|
@@ -84,10 +113,10 @@ No step needs a bypass, and no step can block the PR that applies the next one.
 2. **Repo admin**: apply `policy-main-protected` to fabricbloc-branch-policy. Cris stays able to merge via PR (OrganizationAdmin bypass in `pull_request` mode, 0 approvals). TODO-VERIFY that the merge box offers the bypass under the `update` rule.
 3. **Human PR from Cris** (branch `madgeniusblink/ci/f6-agent-gates`, merged as PR #4 → squash `04a7d3a91aa7a1376ef0a5ae0cf9dcf80ca2df33`) added `.github/workflows/agent-*.yml`, `agent-gates/`, `rulesets/`, and this README. Run `python3 agent-gates/test.py`. On its own repo the gates exit 0 by design (`SELF_REPO`). **S** = that SHA; `canon.json` `pins.agent_gates_sha` and both `workflows[].sha` are pinned to **S** in PR on `agent/session/ci/pin-agent-gates-sha`.
 4. **Org owner** creates branch `f6-gate-test` in fabricbloc from main. Then create `canon-agent-gates` with `conditions.ref_name.include = ["refs/heads/f6-gate-test"]` (the `_bootstrap_ref_include`), via Org → Settings → Rules → Rulesets → Import, or `gh api -X POST orgs/BloclabsHQ/rulesets --input body.json`. Nothing that targets main is affected.
-5. Run the **malicious test** below against `f6-gate-test`. When it passes, change `ref_name.include` to `["~DEFAULT_BRANCH"]` (**Cris applies** in the org ruleset UI). Ask authors of open PRs to push or reopen [C8]. Break-glass if the gate can't start (for example, runner trouble blocks all PRs to main): an org owner sets the ruleset to Disabled, which is audit-logged.
+5. Run the **malicious test** below against `f6-gate-test`. When it passes, change `ref_name.include` to `~DEFAULT_BRANCH`, `refs/heads/release/**`, and `refs/heads/prod/**` (**Cris applies** in the org ruleset UI). Ask authors of open PRs to push or reopen [C8]. Break-glass if the gate can't start (for example, runner trouble blocks all PRs to main): an org owner sets the ruleset to Disabled, which is audit-logged.
 6. Apply `main-required-ci` with **9** contexts. `agent-denied-paths` and `agent-review-of-record` are no longer status-check contexts. Remove or align classic branch protection on main.
 7. Optional, D6: `canon-branch-name-guard-pinned`, then drop `guard / guard` from `main-required-ci`.
-8. **Q12** at any time after confirming Cursor's branch-prefix setting. **Q14** only after the stage-1 identity test below. **Q16** only after submodule-bump moves off the PAT.
+8. **Q12** at any time after confirming Cursor's branch-prefix setting. **Q14** only after the stage-1 identity test below. **Q16** only after submodule-bump moves off the PAT. **Finding (c):** apply `canon-branch-creation-restricted` and `canon-deploy-branches-human-only` on fabricbloc; widen `canon-agent-gates` ref scope and re-pin gate SHA with the `base != main` rule (stacked PR on #7).
 9. Set the manifest `enforcement_boundary.required_workflow_ruleset.git_ref = S` (human PR), then run `cursor-env-drift` with `strict_live=true`. It must open no issue.
 
 The apply workflow comes later. It lives in branch-policy and calls the API with a company App that has org `administration: write`. It doesn't push, so `policy-main-protected` and Q14 never block it. That App must not be a bypass actor anywhere. The first apply is by hand (steps 2, 4, 6), because that App doesn't exist yet.
@@ -162,12 +191,11 @@ Org ruleset `canon-agent-gates` (org ruleset id **24445414**) enforces `agent-de
 
 **Post re-pin check (hosted runners):** On branch `f6-gate-test`, open one PR and confirm each org-required workflow run shows a GitHub-hosted runner (`runner_name` like `GitHub Actions …`, labels including `ubuntu-latest`) and completes (not stuck queued). If runs stay queued, revert the pin to `04a7d3a` and investigate billing/runner policy before retrying.
 
-**M6 probe (retarget gap, finding (c)):** Documents whether an **agent/** PR **retargeted** to a fresh base branch still runs the org-required gates. With `canon-agent-gates` scoped to `~DEFAULT_BRANCH` only, retargeting away from `main` may **drop** the ruleset — that gap is open until ref scope is widened deliberately in the org UI. Steps:
+**M6 probe (retarget gap, finding (c)):** After Cris re-pins org ruleset **24445414** to a gate SHA that includes the `agent PRs must target main` rule and widens `ref_name.include` to main + `release/**` + `prod/**`:
 
-1. After Cris re-pins org ruleset **24445414** (`canon-agent-gates`) to the new gate SHA, open or retarget an existing **agent/** PR so its base is a new branch (for example `f6-gate-retarget-probe`) that is not `main`.
-2. Wait for (or re-run) the org-required gate workflows on the PR head.
-3. Record whether `agent-denied-paths` and `agent-review-of-record` still appear and their conclusions (if the checks vanish, the retarget gap is confirmed).
-4. Run `agent-gates/probes/m6_retarget.sh` with `PR=<number>` (and optional `ORG` / `REPO`). The script only reads check runs via `gh`; it **never merges** or pushes.
+1. **(i) Ruleset B:** Manually verify an attended agent **cannot push** a new branch such as `probe/ungated-base` (not `main`, not `agent/**`, not `<handle>/<type>/<slug>`). Expect rejection from `canon-branch-creation-restricted`.
+2. **(ii) Retarget check:** Open or retarget an **agent/** PR so its base is `release/<name>` (or `prod/<name>`). Expect pinned `agent-denied-paths` / `agent-review-of-record` to run and **not** succeed (failure or missing checks before re-pin).
+3. Run `agent-gates/probes/m6_retarget.sh` with `PR=<number>`. The script only reads check runs via `gh`; it **never merges**, pushes, or creates branches.
 
 ## Reviewer GitHub App (`fabricbloc-reviewer`)
 
@@ -203,7 +231,9 @@ Create the App in the BloclabsHQ org settings. It must not appear on any ruleset
 1. Note the bot's numeric user id (`GET /users/fabricbloc-reviewer%5Bbot%5D`).
 2. Add `("fabricbloc-reviewer[bot]", <id>)` to `REVIEWER_APP_BOTS` in `embedded_gate.py`, run `python3 agent-gates/sync_embedded_gate.py`, merge, and **re-pin** org ruleset **24445414** once to the new gate SHA.
 3. Add the bot login to `ai_reviewers` in fabricbloc `agents/runtime/engine/config.yaml` via a **human PR only** — that path is denied for agent PRs (`agent-denied-paths`).
-4. Run **M6** (`agent-gates/probes/m6_retarget.sh`) on an agent PR retargeted to a fresh branch and record the retarget-gap outcome.
+4. Run **M6** (`agent-gates/probes/m6_retarget.sh`) on an agent PR retargeted to `release/**` and record outcomes for (i) and (ii).
+
+**Private key rotation:** Rotate the reviewer App key every **180 days**; update 1Password only (never Actions secrets). Re-pin org ruleset **24445414** after any gate constant change.
 
 ## Unverified (TODO-VERIFY)
 
