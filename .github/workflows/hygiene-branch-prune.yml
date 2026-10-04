@@ -245,12 +245,15 @@ jobs:
           """C5 weekly prune of merged agent/** branches (stdlib, API-only)."""
           import json
           import os
+          import re
           import time
 
 
           MODE = "hygiene-c5-branch-prune"
           BRANCH_GLOB_PREFIX = "agent/"
           MIN_AGE_HOURS_DEFAULT = 72
+          ACK_RUN_RE = re.compile(r"/actions/runs/(\d+)(?:[/?#]|$)")
+          WORKFLOW_PATH = ".github/workflows/hygiene-branch-prune.yml"
 
 
           def env(name, default=""):
@@ -335,6 +338,46 @@ jobs:
               call(f"/repos/{repo}/git/refs/heads/{branch}", token=token, method="DELETE", allow_404=True)
 
 
+          def parse_ack_run_id(ack):
+              ack = (ack or "").strip()
+              if not ack:
+                  return None
+              if ack.isdigit():
+                  return ack
+              m = ACK_RUN_RE.search(ack)
+              return m.group(1) if m else None
+
+
+          def verify_dryrun_ack(token, repo, ack):
+              run_id = parse_ack_run_id(ack)
+              if not run_id:
+                  fail(
+                      MODE,
+                      "live refused: HYGIENE_C5_DRYRUN_ACK must be a completed dry-run run id or Actions run URL",
+                  )
+              run = call(f"/repos/{repo}/actions/runs/{run_id}", token=token, allow_404=True)
+              if run is None:
+                  fail(MODE, f"live refused: dry-run ack run {run_id} not found")
+              if run.get("status") != "completed":
+                  fail(
+                      MODE,
+                      f"live refused: dry-run ack run {run_id} status is {run.get('status')!r}, need completed",
+                  )
+              conclusion = run.get("conclusion")
+              if conclusion != "success":
+                  fail(
+                      MODE,
+                      f"live refused: dry-run ack run {run_id} conclusion is {conclusion!r}, need success",
+                  )
+              path = run.get("path") or ""
+              if path and path != WORKFLOW_PATH:
+                  fail(
+                      MODE,
+                      f"live refused: ack run workflow path {path!r} is not {WORKFLOW_PATH}",
+                  )
+              return run_id
+
+
           def main():
               token = env("GH_TOKEN")
               slack = env("SLACK_BOT_TOKEN")
@@ -347,8 +390,10 @@ jobs:
 
               if not token:
                   fail(MODE, "GH_TOKEN missing")
-              if mode == "live" and not ack:
-                  fail(MODE, "live refused: set HYGIENE_C5_DRYRUN_ACK to a completed dry-run run id")
+              if mode == "live":
+                  if not ack:
+                      fail(MODE, "live refused: set HYGIENE_C5_DRYRUN_ACK to a completed dry-run run id or URL")
+                  verify_dryrun_ack(token, repo, ack)
 
               delete_branch_on_merge = call(f"/repos/{repo}", token=token).get("delete_branch_on_merge")
               print(f"delete_branch_on_merge={delete_branch_on_merge}")

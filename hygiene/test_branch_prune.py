@@ -57,6 +57,9 @@ REPO = "BloclabsHQ/fabricbloc"
 class TestBranchPrune(unittest.TestCase):
     def setUp(self):
         Fake.routes.clear()
+        sys.modules.pop("common", None)
+        sys.modules.pop("branch_prune", None)
+        os.environ["API"] = API
         load("common")
         self.mod = load("branch_prune")
 
