@@ -30,6 +30,7 @@
       ],
       "_post_rollout_ref_include": [
         "~DEFAULT_BRANCH",
+        "refs/heads/main",
         "refs/heads/release/**",
         "refs/heads/prod/**"
       ],
@@ -38,7 +39,9 @@
       "conditions": {
         "repository_name": {
           "include": [
-            "fabricbloc"
+            "fabricbloc",
+            "context",
+            "keyflo-session-issuer"
           ],
           "exclude": [],
           "protected": true

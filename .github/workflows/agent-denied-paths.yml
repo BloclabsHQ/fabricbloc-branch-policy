@@ -49,6 +49,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           # AG-04 / AG-05: warn first; set to fail after one cycle (see domains/03-agent-gates/rules.yaml).
           PROVIDER_CONTROL_ENFORCE: warn
           PROJECTION_ENFORCE: warn
@@ -62,7 +63,11 @@ jobs:
           import json, os, re, sys, urllib.error, urllib.parse, urllib.request
 
           SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
-          TARGET_REPOS = {"BloclabsHQ/fabricbloc"}
+          TARGET_REPOS = {
+              "BloclabsHQ/fabricbloc",
+              "BloclabsHQ/context",
+              "BloclabsHQ/keyflo-session-issuer",
+          }
           DEFAULT_BASE_REF = "main"
           MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
           ENGINE_CONFIG = "agents/runtime/engine/config.yaml"
@@ -342,8 +347,10 @@ jobs:
               return BOOTSTRAP_BASE_REFS
 
 
-          def pr_base_treated_as_main(base_ref):
-              """True when agent PR base is main or an exact bootstrap refs/heads/* entry (case-sensitive)."""
+          def pr_base_treated_as_main(base_ref, default_branch):
+              """True when agent PR base is the repo default branch, `main`, or exact bootstrap ref."""
+              if default_branch and base_ref == default_branch:
+                  return True, False
               if base_ref == DEFAULT_BASE_REF:
                   return True, False
               full = f"refs/heads/{base_ref}"
@@ -366,8 +373,8 @@ jobs:
                       pass
 
 
-          def enforce_agent_pr_base_ref(base_ref):
-              ok, bootstrap = pr_base_treated_as_main(base_ref)
+          def enforce_agent_pr_base_ref(base_ref, default_branch):
+              ok, bootstrap = pr_base_treated_as_main(base_ref, default_branch)
               if not ok:
                   fail("agent PRs must target main")
               if bootstrap:
@@ -385,7 +392,7 @@ jobs:
               return parsed
 
 
-          def agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref):
+          def agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref, default_branch):
               why = []
               if head_ref.lower().startswith("agent/"):
                   why.append("agent/** head ref")
@@ -395,7 +402,7 @@ jobs:
                   if commit_node_agent_identity(c):
                       why.append(f"agent commit identity on {c.get('sha', '')[:12]}")
                       break
-              if base_ref == DEFAULT_BASE_REF:
+              if pr_base_treated_as_main(base_ref, default_branch)[0]:
                   for c in commits:
                       sha = c.get("sha")
                       if sha and commit_came_from_agent_pr(sha):
@@ -404,14 +411,16 @@ jobs:
               return why
 
 
-          def agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref):
-              """Agent work: head ref, PR author, commits, Co-authored-by, or agent PR provenance on main."""
-              return bool(agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref))
+          def agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref, default_branch):
+              """Agent work: head ref, PR author, commits, Co-authored-by, or agent PR provenance on gated base."""
+              return bool(agent_identity_reasons(
+                  head_ref, author, author_type, author_id, commits, base_ref, default_branch))
 
 
-          def gate_applies(head_ref, author, author_type, author_id, commits, base_ref,
+          def gate_applies(head_ref, author, author_type, author_id, commits, base_ref, default_branch,
                            humans, ai_reviewers, reviewer_bots):
-              why = agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref)
+              why = agent_identity_reasons(
+                  head_ref, author, author_type, author_id, commits, base_ref, default_branch)
               if why:
                   return True, why
               if is_reviewer_app(author, author_id, reviewer_bots):
@@ -489,6 +498,9 @@ jobs:
               number = os.environ.get("PR", "")
               if not number.isdigit():
                   fail("no pull request number in the event (only pull_request events are supported)")
+              default_branch = os.environ.get("REPO_DEFAULT_BRANCH", "").strip()
+              if not default_branch:
+                  fail("REPO_DEFAULT_BRANCH is empty; workflow must set github.event.repository.default_branch")
               pr = call(f"/repos/{REPO}/pulls/{number}")
               event_head = os.environ.get("EVENT_HEAD_SHA", "")
               head, base_sha = pr["head"]["sha"], pr["base"]["sha"]
@@ -509,10 +521,10 @@ jobs:
               commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS, fail_at_cap=True)
               if len(commits) != reported_commits:
                   fail(f"commit count mismatch (PR says {reported_commits}, listed {len(commits)})")
-              if agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref):
-                  enforce_agent_pr_base_ref(base_ref)
+              if agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref, default_branch):
+                  enforce_agent_pr_base_ref(base_ref, default_branch)
               applies, why = gate_applies(
-                  head_ref, author, author_type, author_id, commits, base_ref,
+                  head_ref, author, author_type, author_id, commits, base_ref, default_branch,
                   humans, ai_rev, reviewer_bots)
               if not applies:
                   print(f"{MODE}: not gated ({why[0]}); human merge authority applies.")
