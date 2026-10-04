@@ -69,6 +69,11 @@ class TestHygieneContract(unittest.TestCase):
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("ci_red").rstrip("\n"))
 
+    def test_stale_embed_synced(self):
+        body = embedded("hygiene-stale")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("stale").rstrip("\n"))
+
     def test_top_level_permissions_empty(self):
         for stem in HYGIENE_WORKFLOWS:
             path = WF / f"{stem}.yml"
