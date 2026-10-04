@@ -70,7 +70,7 @@ jobs:
           inputs.allow_dependabot &&
           github.event_name == 'pull_request_target' &&
           github.event.pull_request.user.login == 'dependabot[bot]'
-        uses: dependabot/fetch-metadata@0960109a4dd6d503321a0abfa87b9768962ddd12 # v2.4.0
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
         with:
           github-token: ${{ github.token }}
       - name: Mint hygiene App token (T1)
