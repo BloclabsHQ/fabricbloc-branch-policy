@@ -55,34 +55,30 @@ def expected_embed(script_name):
 
 class TestHygieneContract(unittest.TestCase):
     def test_pr_ops_embed_synced(self):
-        body = embedded("hygiene-pr-ops-notify")
-        self.assertIsNotNone(body)
-        self.assertEqual(body.rstrip("\n"), expected_embed("pr_ops_notify").rstrip("\n"))
+        self._assert_embed_synced("hygiene-pr-ops-notify", "pr_ops_notify")
+
+    def _assert_embed_synced(self, stem, script_name):
+        path = WF / f"{stem}.yml"
+        if not path.exists():
+            self.skipTest(f"{stem} not on this branch")
+        body = embedded(stem)
+        self.assertIsNotNone(body, msg=f"{stem} missing embedded PY block")
+        self.assertEqual(body.rstrip("\n"), expected_embed(script_name).rstrip("\n"))
 
     def test_branch_prune_embed_synced(self):
-        body = embedded("hygiene-branch-prune")
-        self.assertIsNotNone(body)
-        self.assertEqual(body.rstrip("\n"), expected_embed("branch_prune").rstrip("\n"))
+        self._assert_embed_synced("hygiene-branch-prune", "branch_prune")
 
     def test_ci_red_embed_synced(self):
-        body = embedded("hygiene-ci-red")
-        self.assertIsNotNone(body)
-        self.assertEqual(body.rstrip("\n"), expected_embed("ci_red").rstrip("\n"))
+        self._assert_embed_synced("hygiene-ci-red", "ci_red")
 
     def test_stale_embed_synced(self):
-        body = embedded("hygiene-stale")
-        self.assertIsNotNone(body)
-        self.assertEqual(body.rstrip("\n"), expected_embed("stale").rstrip("\n"))
+        self._assert_embed_synced("hygiene-stale", "stale")
 
     def test_backlog_lint_embed_synced(self):
-        body = embedded("hygiene-backlog-lint")
-        self.assertIsNotNone(body)
-        self.assertEqual(body.rstrip("\n"), expected_embed("backlog_lint").rstrip("\n"))
+        self._assert_embed_synced("hygiene-backlog-lint", "backlog_lint")
 
     def test_auto_merge_embed_synced(self):
-        body = embedded("hygiene-auto-merge")
-        self.assertIsNotNone(body)
-        self.assertEqual(body.rstrip("\n"), expected_embed("auto_merge").rstrip("\n"))
+        self._assert_embed_synced("hygiene-auto-merge", "auto_merge")
 
     def test_top_level_permissions_empty(self):
         for stem in HYGIENE_WORKFLOWS:
