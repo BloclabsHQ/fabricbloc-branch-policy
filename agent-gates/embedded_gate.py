@@ -74,9 +74,11 @@ def is_agent(login=None, email=None, user_id=None):
             return True
     except (TypeError, ValueError):
         pass
-    if login and (login in AGENT_LOGINS or login.lower().endswith("[bot]")):
-        return True
-    e = (email or "").lower()
+    if login:
+        l = login.strip().lower()
+        if l in AGENT_LOGINS or l.endswith("[bot]"):
+            return True
+    e = (email or "").strip().lower()
     return e in AGENT_EMAILS or e.endswith("[bot]@users.noreply.github.com")
 
 
@@ -124,7 +126,7 @@ def manifest_at(sha):
         fail("base manifest is not valid JSON")
 
 
-def participants(commits, humans, author):
+def participants(commits, allow, author):
     out = {author} if author else set()
     for c in commits:
         linked = False
@@ -139,7 +141,7 @@ def participants(commits, humans, author):
         for key in ("author", "committer"):
             node = inner.get(key) or {}
             name, email = (node.get("name") or "").lower(), (node.get("email") or "").lower()
-            for h in humans:
+            for h in allow:
                 if h.lower() == name or h.lower() in email:
                     out.add(h)
     return out
@@ -222,7 +224,7 @@ def main():
                 allow |= {x.strip().strip("'\"") for x in m.group(1).split(",") if x.strip()}
     if not allow:
         fail("no reviewer allowlist at base (manifest operators.members_expected)")
-    excluded = participants(commits, humans, author)
+    excluded = participants(commits, allow, author)
     reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
     latest = {}
     for r in reviews:

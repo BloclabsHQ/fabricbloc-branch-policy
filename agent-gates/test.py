@@ -163,6 +163,14 @@ class T(unittest.TestCase):
         setup(commits=[commit(None, "199161495+CursorAgent@users.noreply.github.com")])
         self.assertEqual(run("agent-denied-paths")[0], 1)
 
+    def test_agent_login_case_insensitive(self):
+        setup(commits=[commit("CursorAgent", "other@example.com")])
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_agent_email_strip_and_case(self):
+        setup(commits=[commit(None, " CURSORAGENT@CURSOR.COM ")])
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
     def test_empty_gh_token_fails(self):
         setup(files=("docs/x.md",), **AGENT)
         code, out = run("agent-denied-paths", gh_token="")
@@ -174,6 +182,21 @@ class T(unittest.TestCase):
         setup(files=("docs/x.md",), reviews=[approve("fabricbloc-ai-reviewer")],
               engine_config=cfg, **AGENT)
         self.assertEqual(run("agent-review-of-record")[0], 0)
+
+    def test_ai_reviewer_self_approve_linked_commit_fails(self):
+        cfg = "human: ['Madgeniusblink']\nai_reviewers: ['fabricbloc-ai-reviewer']\n"
+        a = dict(AGENT, commits=[commit("fabricbloc-ai-reviewer", "ai@example.com")])
+        setup(files=("docs/x.md",), reviews=[approve("fabricbloc-ai-reviewer")],
+              engine_config=cfg, **a)
+        self.assertEqual(run("agent-review-of-record")[0], 1)
+
+    def test_ai_reviewer_self_approve_unlinked_email_fails(self):
+        cfg = "human: ['Madgeniusblink']\nai_reviewers: ['fabricbloc-ai-reviewer']\n"
+        a = dict(AGENT, commits=[commit(None, "fabricbloc-ai-reviewer@users.noreply.github.com",
+                                      author_email="fabricbloc-ai-reviewer@users.noreply.github.com")])
+        setup(files=("docs/x.md",), reviews=[approve("fabricbloc-ai-reviewer")],
+              engine_config=cfg, **a)
+        self.assertEqual(run("agent-review-of-record")[0], 1)
 
     def test_ai_reviewer_on_handle_branch_not_human_skip(self):
         cfg = "human: ['Madgeniusblink']\nai_reviewers: ['fabricbloc-ai-reviewer']\n"
