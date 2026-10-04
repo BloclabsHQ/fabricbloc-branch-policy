@@ -13,6 +13,7 @@ import test as t  # noqa: E402
 
 CANON_PATH = ROOT / "rulesets" / "canon.json"
 GATE_PATH = ROOT / "agent-gates" / "embedded_gate.py"
+VALIDATE_CANON_PATH = ROOT / "agent-gates" / "validate_canon.py"
 
 
 def creation_restricted(c):
@@ -44,10 +45,14 @@ def main():
         t.assert_deploy_human_only_shape(c)
 
     mutations = [
+        ("Add refs/heads/** to creation-restricted exclude",
+         lambda c: creation_restricted(c)["conditions"]["ref_name"]["exclude"].append("refs/heads/**"),
+         check_creation,
+         "test_mutation_creation_restricted_exclude_refs_heads_glob"),
         ("Remove refs/heads/** from creation-restricted include",
          lambda c: creation_restricted(c)["conditions"]["ref_name"]["include"].remove("refs/heads/**"),
          check_creation,
-         "test_mutation_creation_restricted_exclude_refs_heads_glob"),
+         "test_mutation_creation_restricted_without_include_all_heads"),
         ("Replace creation-restricted include with main only",
          lambda c: creation_restricted(c)["conditions"]["ref_name"].__setitem__(
              "include", ["refs/heads/main"]),
@@ -90,9 +95,63 @@ def main():
             CANON_PATH.write_text(orig_canon)
 
     gate_mutations = [
-        ("Base check uses startswith('main') instead of != main",
-         lambda s: s.replace("if base_ref != DEFAULT_BASE_REF:", "if not base_ref.startswith(\"main\"):"),
+        ("Base check uses startswith('main') instead of exact main",
+         lambda s: s.replace(
+             "    if base_ref == DEFAULT_BASE_REF:\n        return True, False",
+             "    if base_ref.startswith(\"main\"):\n        return True, base_ref != DEFAULT_BASE_REF",
+         ),
          "test_mutation_base_check_startswith_main_would_miss_release"),
+        ("Bootstrap base uses prefix match instead of exact",
+         lambda s: s.replace(
+             "    if full in bootstrap_base_ref_allowlist():\n        return True, True",
+             "    allow = bootstrap_base_ref_allowlist()\n"
+             "    if any(full.startswith(x.rstrip(\"*\")) for x in allow):\n"
+             "        return True, True",
+         ),
+         "test_mutation_bootstrap_prefix_match_would_allow_near_miss"),
+        ("Bootstrap list read from PR head via contents API",
+         lambda s: s.replace(
+             "    return BOOTSTRAP_BASE_REFS\n",
+             "    text = base_text(\"rulesets/canon.json\", os.environ.get(\"EVENT_HEAD_SHA\", \"\"))\n"
+             "    if not text:\n        return frozenset()\n"
+             "    data = json.loads(text)\n"
+             "    for rs in data.get(\"organization_rulesets\") or []:\n"
+             "        if rs.get(\"name\") == \"canon-agent-gates\":\n"
+             "            raw = rs.get(\"_bootstrap_ref_include\") or []\n"
+             "            return frozenset(e for e in raw if isinstance(e, str))\n"
+             "    return frozenset()\n",
+             1,
+         ),
+         "test_mutation_bootstrap_reads_from_pr_head_repo"),
+        ("Bootstrap treats empty allowlist as allow-all",
+         lambda s: re.sub(
+             r"^BOOTSTRAP_BASE_REFS = frozenset\(\{.*\}\)\s*$",
+             "BOOTSTRAP_BASE_REFS = frozenset()",
+             s.replace(
+                 "    if full in bootstrap_base_ref_allowlist():\n        return True, True",
+                 "    allow = bootstrap_base_ref_allowlist()\n"
+                 "    if not allow:\n        return True, True\n"
+                 "    if full in allow:\n        return True, True",
+             ),
+             count=1,
+             flags=re.M,
+         ),
+         "test_mutation_bootstrap_empty_list_allows_all_bases"),
+        ("Bootstrap allowlist read from POLICY_CANON_PATH env file",
+         lambda s: s.replace(
+             "    return BOOTSTRAP_BASE_REFS\n",
+             "    path = os.environ.get(\"POLICY_CANON_PATH\", \"\").strip()\n"
+             "    if path:\n"
+             "        with open(path, encoding=\"utf-8\") as fp:\n"
+             "            data = json.load(fp)\n"
+             "        for rs in data.get(\"organization_rulesets\") or []:\n"
+             "            if rs.get(\"name\") == \"canon-agent-gates\":\n"
+             "                raw = rs.get(\"_bootstrap_ref_include\") or []\n"
+             "                return frozenset(e for e in raw if isinstance(e, str))\n"
+             "    return BOOTSTRAP_BASE_REFS\n",
+             1,
+         ),
+         "test_mutation_bootstrap_policy_canon_path_env_read"),
         ("Remove PR author leg from agent_identity_reasons",
          lambda s: re.sub(
              r'    if author_type == "Bot" or is_agent\(login=author, user_id=author_id\):\n'
@@ -107,7 +166,7 @@ def main():
          "test_mutation_lineage_ignores_bot_author_type"),
         ("Commits/pulls skips fail-closed on bad API shape",
          lambda s: s.replace(
-             "    pulls = paginate(path, MAX_COMMIT_PULLS)",
+             "    pulls = paginate(path, MAX_COMMIT_PULLS, fail_at_cap=True)",
              "    pulls = call(path)\n    if not isinstance(pulls, list):\n        return False",
              1,
          ).replace(
@@ -139,6 +198,13 @@ def main():
              1,
          ),
          "test_mutation_coauthor_only_first_trailer"),
+        ("Lineage continues at commits/pulls pagination cap",
+         lambda s: s.replace(
+             "pulls = paginate(path, MAX_COMMIT_PULLS, fail_at_cap=True)",
+             "pulls = paginate(path, MAX_COMMIT_PULLS)",
+             1,
+         ),
+         "test_mutation_commit_pulls_continues_at_cap_passes_human_skip"),
     ]
     for label, mut, test_name in gate_mutations:
         GATE_PATH.write_text(mut(orig_gate))
@@ -147,6 +213,21 @@ def main():
         rows.append((label, test_name, "fail" if code != 0 else "ERROR: test passed"))
         GATE_PATH.write_text(orig_gate)
         subprocess.run([sys.executable, str(ROOT / "agent-gates" / "sync_embedded_gate.py")], check=True)
+
+    orig_validate = VALIDATE_CANON_PATH.read_text()
+    validate_mutations = [
+        ("Bootstrap ref include exact check loosened to subset only",
+         lambda s: s.replace(
+             "        if inc_set != bootstrap_set:",
+             "        if bootstrap_set - inc_set:",
+         ),
+         "test_mutation_validate_canon_bootstrap_include_subset_only"),
+    ]
+    for label, mut, test_name in validate_mutations:
+        VALIDATE_CANON_PATH.write_text(mut(orig_validate))
+        code, _ = run_tests(test_name)
+        rows.append((label, test_name, "fail" if code != 0 else "ERROR: test passed"))
+        VALIDATE_CANON_PATH.write_text(orig_validate)
 
     print("| Mutation | Contract test | Result |")
     print("|---|---|---|")

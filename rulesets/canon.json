@@ -16,8 +16,8 @@
     "_note": "Public source: a public workflow may run on any repository in the org, so no Actions 'Access' setting is needed."
   },
   "pins": {
-    "agent_gates_sha": "04a7d3a91aa7a1376ef0a5ae0cf9dcf80ca2df33",
-    "branch_name_guard_sha": "e8e6a8e4de740d594af486b7274b16070846bf52",
+    "agent_gates_sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25",
+    "branch_name_guard_sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25",
     "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs."
   },
   "organization_rulesets": [
@@ -27,6 +27,11 @@
       "_apply_after": "README step 4 with conditions.ref_name.include = _bootstrap_ref_include; step 5 switches to ~DEFAULT_BRANCH after the malicious test",
       "_bootstrap_ref_include": [
         "refs/heads/f6-gate-test"
+      ],
+      "_post_rollout_ref_include": [
+        "~DEFAULT_BRANCH",
+        "refs/heads/release/**",
+        "refs/heads/prod/**"
       ],
       "target": "branch",
       "enforcement": "active",
@@ -42,9 +47,7 @@
         },
         "ref_name": {
           "include": [
-            "~DEFAULT_BRANCH",
-            "refs/heads/release/**",
-            "refs/heads/prod/**"
+            "refs/heads/f6-gate-test"
           ],
           "exclude": []
         }
@@ -61,13 +64,13 @@
                 "repository_id": 1349282028,
                 "path": ".github/workflows/agent-denied-paths.yml",
                 "ref": "refs/heads/main",
-                "sha": "04a7d3a91aa7a1376ef0a5ae0cf9dcf80ca2df33"
+                "sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25"
               },
               {
                 "repository_id": 1349282028,
                 "path": ".github/workflows/agent-review-of-record.yml",
                 "ref": "refs/heads/main",
-                "sha": "04a7d3a91aa7a1376ef0a5ae0cf9dcf80ca2df33"
+                "sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25"
               }
             ]
           }
@@ -106,7 +109,7 @@
                 "repository_id": 1349282028,
                 "path": ".github/workflows/branch-name-guard.yml",
                 "ref": "refs/heads/main",
-                "sha": "e8e6a8e4de740d594af486b7274b16070846bf52"
+                "sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25"
               }
             ]
           }

@@ -48,7 +48,10 @@ HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|do
 MAX_FILES = 3000   # pulls/{n}/files hard limit
 MAX_COMMITS = 250  # pulls/{n}/commits hard limit
 MAX_COMMIT_PULLS = 500  # commits/{sha}/pulls hard limit
-
+CANON_AGENT_GATES = "canon-agent-gates"
+# Embedded at pin from rulesets/canon.json (canon-agent-gates._bootstrap_ref_include).
+# agent-gates/sync_embedded_gate.py refreshes this line; never read from the gated PR repo.
+BOOTSTRAP_BASE_REFS = frozenset({'refs/heads/f6-gate-test'})
 API = os.environ.get("API", "https://api.github.com").rstrip("/")
 TOKEN = os.environ.get("GH_TOKEN", "")
 MODE = os.environ.get("MODE", "")
@@ -97,7 +100,7 @@ def call(path, accept="application/vnd.github+json", allow_404=False):
     return body if accept.endswith(".raw") else json.loads(body or "null")
 
 
-def paginate(path, cap):
+def paginate(path, cap, fail_at_cap=False):
     out, page = [], 1
     while True:
         sep = "&" if "?" in path else "?"
@@ -105,7 +108,11 @@ def paginate(path, cap):
         if not isinstance(batch, list):
             fail(f"unexpected API shape for {path}")
         out += batch
-        if len(batch) < 100 or len(out) >= cap:
+        if len(out) >= cap:
+            if fail_at_cap:
+                fail(f"pagination cap ({cap}) reached for {path.split('?')[0]}; failing closed")
+            return out
+        if len(batch) < 100:
             return out
         page += 1
 
@@ -183,7 +190,7 @@ def pull_is_agent_provenance(pr):
 
 def commit_came_from_agent_pr(commit_sha):
     path = f"/repos/{REPO}/commits/{commit_sha}/pulls"
-    pulls = paginate(path, MAX_COMMIT_PULLS)
+    pulls = paginate(path, MAX_COMMIT_PULLS, fail_at_cap=True)
     for p in pulls:
         if not isinstance(p, dict):
             fail(f"unexpected API shape for commits/{commit_sha[:12]}/pulls entry")
@@ -253,6 +260,43 @@ def parse_flow_list_line(cfg, key):
         return False
     out = {s.strip() for s in parsed if s.strip()}
     return out
+
+
+def bootstrap_base_ref_allowlist():
+    """Policy-repo canon at pin (embedded BOOTSTRAP_BASE_REFS only). Never the PR head repo."""
+    return BOOTSTRAP_BASE_REFS
+
+
+def pr_base_treated_as_main(base_ref):
+    """True when agent PR base is main or an exact bootstrap refs/heads/* entry (case-sensitive)."""
+    if base_ref == DEFAULT_BASE_REF:
+        return True, False
+    full = f"refs/heads/{base_ref}"
+    if full in bootstrap_base_ref_allowlist():
+        return True, True
+    return False, False
+
+
+def emit_bootstrap_base_warning(full_ref):
+    msg = (
+        f"BOOTSTRAP BASE ALLOWANCE ACTIVE for {full_ref}; "
+        "remove _bootstrap_ref_include before rollout")
+    print(f"::warning::{msg}")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
+    if summary_path:
+        try:
+            with open(summary_path, "a", encoding="utf-8") as f:
+                f.write(f"## {msg}\n\n")
+        except OSError:
+            pass
+
+
+def enforce_agent_pr_base_ref(base_ref):
+    ok, bootstrap = pr_base_treated_as_main(base_ref)
+    if not ok:
+        fail("agent PRs must target main")
+    if bootstrap:
+        emit_bootstrap_base_warning(f"refs/heads/{base_ref}")
 
 
 def ai_reviewers_from_cfg(cfg):
@@ -387,12 +431,11 @@ def main():
     reported_commits = int(pr.get("commits") or 0)
     if reported_commits >= MAX_COMMITS:
         fail(f"PR has {reported_commits} commits (API cap {MAX_COMMITS}); cannot see them all")
-    commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS)
+    commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS, fail_at_cap=True)
     if len(commits) != reported_commits:
         fail(f"commit count mismatch (PR says {reported_commits}, listed {len(commits)})")
     if agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref):
-        if base_ref != DEFAULT_BASE_REF:
-            fail("agent PRs must target main")
+        enforce_agent_pr_base_ref(base_ref)
     applies, why = gate_applies(
         head_ref, author, author_type, author_id, commits, base_ref,
         humans, ai_rev, reviewer_bots)

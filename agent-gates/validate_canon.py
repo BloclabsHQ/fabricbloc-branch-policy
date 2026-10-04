@@ -11,8 +11,7 @@ from pathlib import Path
 import jsonschema
 
 URL = "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json"
-api = json.load(open(sys.argv[1])) if len(sys.argv) > 1 else json.load(urllib.request.urlopen(URL, timeout=120))
-canon = json.loads((Path(__file__).resolve().parents[1] / "rulesets" / "canon.json").read_text())
+CANON_PATH = Path(__file__).resolve().parents[1] / "rulesets" / "canon.json"
 
 
 def strip(o):
@@ -23,15 +22,65 @@ def strip(o):
     return o
 
 
-bad = 0
-for path, items in (("/orgs/{org}/rulesets", canon["organization_rulesets"]),
-                    ("/repos/{owner}/{repo}/rulesets", canon["repository_rulesets"])):
-    sch = dict(api["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"])
-    sch["components"] = api["components"]
-    v = jsonschema.validators.validator_for(sch)(sch)
-    for rs in items:
-        body = json.loads(json.dumps(strip(rs)).replace('"TODO-PIN agent_gates_sha"', '"' + "0" * 40 + '"'))
-        errs = [e.message for e in v.iter_errors(body)]
-        print(f"{'OK ' if not errs else 'BAD'} {path} {rs['name']} {errs[:3] if errs else ''}")
-        bad += bool(errs)
-sys.exit(1 if bad else 0)
+def bootstrap_rollout_mutex_errors(canon):
+    errs = []
+    for rs in canon.get("organization_rulesets") or []:
+        if not isinstance(rs, dict) or rs.get("name") != "canon-agent-gates":
+            continue
+        bootstrap = rs.get("_bootstrap_ref_include") or []
+        if not bootstrap:
+            continue
+        inc = (rs.get("conditions") or {}).get("ref_name", {}).get("include") or []
+        for marker in ("~DEFAULT_BRANCH", "refs/heads/main"):
+            if marker in inc:
+                errs.append(
+                    f"canon-agent-gates: _bootstrap_ref_include must be empty when "
+                    f"ref_name.include contains {marker} (rollout state)")
+    return errs
+
+
+def bootstrap_ref_include_exact_errors(canon):
+    errs = []
+    for rs in canon.get("organization_rulesets") or []:
+        if not isinstance(rs, dict) or rs.get("name") != "canon-agent-gates":
+            continue
+        bootstrap = rs.get("_bootstrap_ref_include") or []
+        if not bootstrap:
+            continue
+        bootstrap_set = set(bootstrap)
+        inc = (rs.get("conditions") or {}).get("ref_name", {}).get("include") or []
+        inc_set = set(inc)
+        if inc_set != bootstrap_set:
+            errs.append(
+                "canon-agent-gates: conditions.ref_name.include must equal "
+                "_bootstrap_ref_include exactly while bootstrap is non-empty")
+    return errs
+
+
+def main():
+    api = json.load(open(sys.argv[1])) if len(sys.argv) > 1 else json.load(
+        urllib.request.urlopen(URL, timeout=120))
+    canon = json.loads(CANON_PATH.read_text())
+    mutex_errs = bootstrap_rollout_mutex_errors(canon)
+    for msg in mutex_errs:
+        print(f"BAD bootstrap/rollout mutex {msg}")
+    exact_errs = bootstrap_ref_include_exact_errors(canon)
+    for msg in exact_errs:
+        print(f"BAD bootstrap ref include {msg}")
+    bad = len(mutex_errs) + len(exact_errs)
+    for path, items in (("/orgs/{org}/rulesets", canon["organization_rulesets"]),
+                        ("/repos/{owner}/{repo}/rulesets", canon["repository_rulesets"])):
+        sch = dict(api["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"])
+        sch["components"] = api["components"]
+        v = jsonschema.validators.validator_for(sch)(sch)
+        for rs in items:
+            body = json.loads(json.dumps(strip(rs)).replace(
+                '"TODO-PIN agent_gates_sha"', '"' + "0" * 40 + '"'))
+            errs = [e.message for e in v.iter_errors(body)]
+            print(f"{'OK ' if not errs else 'BAD'} {path} {rs['name']} {errs[:3] if errs else ''}")
+            bad += bool(errs)
+    sys.exit(1 if bad else 0)
+
+
+if __name__ == "__main__":
+    main()
