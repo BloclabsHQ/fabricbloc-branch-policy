@@ -16,7 +16,7 @@ matrix against the workflow's embedded validator.
 # F6 enforcement: gates a PR cannot rewrite
 
 **DRAFT ONLY.** Nothing here has been pushed, applied or opened as a PR, and no GitHub setting was changed. No secret values were read.
-The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match. `rulesets/canon.json` `pins.agent_gates_sha` and `pins.hygiene_sha` are both `da812e6c04a60c84ad7d76677930a3d919f95d45` (single hygiene-stack re-pin on main after #40); both `canon-agent-gates` workflow SHAs match `pins.agent_gates_sha`. `pins.branch_name_guard_sha` remains `e8a5985f5ebf7b3795716b29fb3778e9842a3e25` until a branch-guard re-pin.
+The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match. `rulesets/canon.json` `pins.agent_gates_sha` and `pins.hygiene_sha` are both `1ddbd5bc04e4d7afa69be602aceede299774624d` (re-pin after #44 fabricbloc-reviewer App pin); both `canon-agent-gates` workflow SHAs match `pins.agent_gates_sha`. `pins.branch_name_guard_sha` remains `e8a5985f5ebf7b3795716b29fb3778e9842a3e25` until a branch-guard re-pin.
 Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281` (pushed 7:54 PM PT, after the 1ab108f revision the review cited), its files, the 4 Codex inline comments, the 1 conversation comment, the 1 review, and the live branch-policy tree and commits.
 
 ## Files
@@ -178,7 +178,7 @@ Safe order: **(a) → main-required-ci 9 contexts → Q12 → Q14 (after the ide
 
 ## Runbook: required workflows vs decoy checks
 
-Org ruleset `canon-agent-gates` (org ruleset id **24445414**, **Active**, no bypass) enforces `agent-denied-paths` and `agent-review-of-record` from **this** repo at **pinned SHA** `da812e6c04a60c84ad7d76677930a3d919f95d45` (`rulesets/canon.json` → `workflows[].sha`), not from the PR branch. Target repositories: `fabricbloc`, `context`, `keyflo-session-issuer`. Org gate `ref_name.include`: `~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`. Agent merge bases use `REPO_DEFAULT_BRANCH` from the event plus `main`. Optional org ruleset `canon-branch-name-guard-pinned` pins the same way for `branch-name-guard` (fabricbloc only).
+Org ruleset `canon-agent-gates` (org ruleset id **24445414**, **Active**, no bypass) enforces `agent-denied-paths` and `agent-review-of-record` from **this** repo at **pinned SHA** `1ddbd5bc04e4d7afa69be602aceede299774624d` (`rulesets/canon.json` → `workflows[].sha`), not from the PR branch. Target repositories: `fabricbloc`, `context`, `keyflo-session-issuer`. Org gate `ref_name.include`: `~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`. Agent merge bases use `REPO_DEFAULT_BRANCH` from the event plus `main`. Optional org ruleset `canon-branch-name-guard-pinned` pins the same way for `branch-name-guard` (fabricbloc only).
 
 **Decoy checks.** A PR can add a repo-local workflow job with the same display name that exits 0. That green row is **not** the gate. The authoritative run is the one whose check details link to  
 `https://github.com/BloclabsHQ/fabricbloc/actions/required_workflows/<ruleset-workflow-id>`  
