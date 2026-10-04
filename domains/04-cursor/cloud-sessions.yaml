@@ -1,0 +1,60 @@
+# Cursor Cloud session policy (CU-*). Harnesses read at pinned SHA; no drift job here (no Cursor API key in CI).
+schema_version: 1
+policy_id: cursor-cloud-sessions
+calibrated_from: "2026-10-04 Loom cursor-slowness memo (69 sessions); overrides Aether cloud-lifecycle-spec where they differ"
+
+launch:
+  work_key:
+    strategy: find_by_pr_then_reply
+    never_relaunch_if_agent_exists: true
+  branch_name:
+    # GOV-0022 agent grammar (same as branch-name-guard AGENT_RE).
+    session_branch_regex: '^agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+$'
+  registry:
+    recheck_and_claim_before_launch: true
+    dedupe_after_launch: true
+    note: "No atomic cap in Cursor API; list-then-launch races require claim + post-launch dedupe."
+
+caps:
+  max_concurrent_running: 4
+  max_concurrent_per_bot: 2
+  max_concurrent_per_repo: 2
+  max_launches_per_hour: 6
+  reserved_slots:
+    - bot_id: madengineer
+      slots: 1
+      purpose: product_hotfix
+      note: "One of MadEngineer's two per-bot slots is reserved for product hotfixes."
+
+waits:
+  max_in_agent_wait_seconds: 120
+  ci_polling_in_agent_forbidden: true
+
+archive:
+  idle_archive_hours: 24
+  triggers:
+    - pr_merged
+    - pr_closed
+    - accepted_no_change_report
+  reference: box-archive-path.md
+
+routing:
+  agent_harness_ticket_labels:
+    - agent-harness
+    - cursor-harness
+    - session-economy
+  route: MadAgentPM -> Loom
+  loom_never_reviews_own_prs: true
+
+phase_in:
+  applies_to: new_sessions_only
+  grandfather:
+    madengineer_in_flight_sessions: true
+    branch_prefixes:
+      - agent/autonomous/
+
+consumers:
+  pin: full_40_char_git_sha
+  examples:
+    - BloclabsHQ/context providers/session-economy-policy.toml (cursor_cloud table)
+    - Loom harness / CloudAgent launch wrapper
