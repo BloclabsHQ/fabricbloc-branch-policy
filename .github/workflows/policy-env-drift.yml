@@ -1,0 +1,32 @@
+# Cost class: schedule
+#
+# MR-11: live drift check for BloclabsHQ/fabricbloc deployment environments (R4).
+# Requires GH_AUDIT_TOKEN with repository Environments: read on fabricbloc.
+name: policy-env-drift
+
+on:
+  schedule:
+    - cron: "15 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fabricbloc-environments:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Live environment drift (MR-11)
+        env:
+          GH_AUDIT_TOKEN: ${{ secrets.GH_AUDIT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_AUDIT_TOKEN:-}" ]; then
+            echo "::warning::GH_AUDIT_TOKEN not configured; skipping live env drift (see PR body Cris step)"
+            exit 0
+          fi
+          python3 domains/02-merge-rulesets/env-drift/env_drift.py --live --strict-live
