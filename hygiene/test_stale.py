@@ -35,6 +35,11 @@ class TestStaleExemptions(unittest.TestCase):
         os.environ["CLOSE_AFTER"] = "2099-01-01T00:00:00-07:00"
         self.assertFalse(self.mod.close_allowed())
 
+    def test_close_after_uses_pacific(self):
+        import os
+        os.environ["CLOSE_AFTER"] = "2020-01-01T00:00:00-07:00"
+        self.assertTrue(self.mod.close_allowed())
+
 
 if __name__ == "__main__":
     unittest.main()

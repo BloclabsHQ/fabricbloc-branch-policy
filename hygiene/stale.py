@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """C2 agent PR stale label/close (API-only). Issue stale uses actions/stale in workflow."""
 import os
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from common import (
     HOLD_LABELS,
     SPEC_LABELS,
-    HygieneAPIError,
     call,
     dry_run,
     fail,
@@ -20,6 +20,7 @@ PR_AUTHOR_DEFAULT = "Madgeniusblink"
 PR_HEAD_GLOB = "agent/**"
 CLOSE_MARKER = "<!-- hygiene:c2:close -->"
 STALE_LABEL = "stale"
+PT = ZoneInfo("America/Los_Angeles")
 
 
 def env(name, default=""):
@@ -27,13 +28,18 @@ def env(name, default=""):
 
 
 def parse_ts(s):
-    s = s.replace("-07:00", "+0000").replace("Z", "+0000")
-    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
-        try:
-            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
+    if not s:
+        return None
+    s = s.strip()
+    if s.endswith("-07:00") or s.endswith("-08:00"):
+        wall = s[:-6]
+        return datetime.fromisoformat(wall).replace(tzinfo=PT)
+    if s.endswith("Z"):
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
 
 
 def head_matches(ref, glob):
@@ -53,18 +59,28 @@ def pr_exempt_labels(labels):
     return None
 
 
+def event_timestamp(ev):
+    et = ev.get("event")
+    if et == "committed":
+        commit = ev.get("commit") or {}
+        committer = (commit.get("committer") or commit.get("author") or {})
+        return parse_ts(committer.get("date")) or parse_ts(ev.get("created_at"))
+    return parse_ts(ev.get("created_at") or ev.get("submitted_at"))
+
+
 def last_human_activity(token, repo, pr_number):
-    events = paginate(f"/repos/{repo}/issues/{pr_number}/timeline", token=token, cap=20)
+    events = paginate(f"/repos/{repo}/issues/{pr_number}/timeline", token=token, cap=30)
     latest = None
-    for ev in reversed(events):
+    for ev in events:
         et = ev.get("event")
-        if et in ("committed", "commented", "reviewed", "labeled", "unlabeled"):
-            actor = (ev.get("actor") or {}).get("login") or ""
-            if actor.endswith("[bot]"):
-                continue
-            ts = ev.get("created_at") or ev.get("submitted_at")
-            if ts:
-                latest = parse_ts(ts)
+        if et not in ("committed", "commented", "reviewed", "labeled", "unlabeled"):
+            continue
+        actor = (ev.get("actor") or {}).get("login") or ""
+        if actor.endswith("[bot]"):
+            continue
+        ts = event_timestamp(ev)
+        if ts and (latest is None or ts > latest):
+            latest = ts
     return latest
 
 
@@ -82,7 +98,7 @@ def close_allowed():
     dt = parse_ts(raw)
     if not dt:
         return False
-    return datetime.now(timezone.utc) >= dt
+    return datetime.now(PT) >= dt
 
 
 def main():
@@ -97,9 +113,9 @@ def main():
     if not token:
         fail(MODE, "GH_TOKEN missing")
 
-    denied, _never = fetch_manifest_denied(repo, env("DEFAULT_BRANCH", "main"))
+    denied, _never = fetch_manifest_denied(repo, env("DEFAULT_BRANCH", "main"), mode=MODE)
     prs = paginate(f"/repos/{repo}/pulls?state=open", token=token, cap=50)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(ZoneInfo("UTC"))
     closed = 0
     labeled = 0
 
@@ -129,7 +145,9 @@ def main():
         activity = last_human_activity(token, repo, pr["number"])
         if not activity:
             activity = parse_ts(pr.get("created_at"))
-        age_days = (now - activity).total_seconds() / 86400.0
+        if activity and activity.tzinfo is None:
+            activity = activity.replace(tzinfo=ZoneInfo("UTC"))
+        age_days = (now - activity.astimezone(ZoneInfo("UTC"))).total_seconds() / 86400.0
         labels = {l.get("name") for l in pr.get("labels") or []}
         if age_days < stale_days:
             if STALE_LABEL in labels and not dry_run():
@@ -153,19 +171,20 @@ def main():
                 )
             labeled += 1
         if age_days >= close_days and close_allowed():
-            write_token = app_token or token
             if dry_run():
                 print("DRY-RUN close", pr["number"])
+            elif not app_token:
+                fail(MODE, "live close requires HYGIENE_APP_TOKEN (T1/K10); refusing GITHUB_TOKEN close")
             else:
                 call(
                     f"/repos/{repo}/issues/{pr['number']}/comments",
-                    token=write_token,
+                    token=app_token,
                     method="POST",
                     body={"body": f"Closing stale agent PR. {CLOSE_MARKER}"},
                 )
                 call(
                     f"/repos/{repo}/pulls/{pr['number']}",
-                    token=write_token,
+                    token=app_token,
                     method="PATCH",
                     body={"state": "closed"},
                 )

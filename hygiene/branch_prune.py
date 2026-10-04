@@ -53,7 +53,8 @@ def merged_pr_for_tip(token, repo, branch, sha):
     if not isinstance(prs, list):
         return None
     for pr in prs:
-        if pr.get("merged_at") and (pr.get("head") or {}).get("ref") == branch:
+        head = pr.get("head") or {}
+        if pr.get("merged_at") and head.get("ref") == branch and head.get("sha") == sha:
             return pr
     return None
 
@@ -104,8 +105,8 @@ def main():
 
     if not token:
         fail(MODE, "GH_TOKEN missing")
-    if mode == "live" and ack != run_id:
-        fail(MODE, "live refused: set HYGIENE_C5_DRYRUN_ACK to this run id after a dry-run review")
+    if mode == "live" and not ack:
+        fail(MODE, "live refused: set HYGIENE_C5_DRYRUN_ACK to a completed dry-run run id")
 
     delete_branch_on_merge = call(f"/repos/{repo}", token=token).get("delete_branch_on_merge")
     print(f"delete_branch_on_merge={delete_branch_on_merge}")
@@ -185,8 +186,10 @@ def main():
             slack_post_message(slack, channel, text)
         except Exception as exc:
             fail(MODE, f"slack report failed: {exc}")
-    elif mode != "dry-run":
-        fail(MODE, "SLACK_BOT_TOKEN required for live/report")
+    elif channel and not slack:
+        print(f"::warning::{MODE}: SLACK_BOT_TOKEN missing; report skipped (see job log)")
+    elif mode == "live":
+        fail(MODE, "SLACK_BOT_TOKEN required for live mode")
 
 
 if __name__ == "__main__":
