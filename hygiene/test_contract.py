@@ -105,6 +105,14 @@ class TestHygieneContract(unittest.TestCase):
             needs = [needs]
         self.assertEqual(needs, ["plan"])
 
+    # --- C6 backlog-lint ---
+
+
+    def test_backlog_lint_embed_synced(self):
+        body = embedded("hygiene-backlog-lint")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("backlog_lint").rstrip("\n"))
+
     def test_canon_hygiene_sha_when_present(self):
         import json
 
