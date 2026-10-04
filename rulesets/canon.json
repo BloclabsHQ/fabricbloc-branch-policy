@@ -30,8 +30,7 @@
       ],
       "_post_rollout_ref_include": [
         "~DEFAULT_BRANCH",
-        "refs/heads/release/**",
-        "refs/heads/prod/**"
+        "refs/heads/main"
       ],
       "target": "branch",
       "enforcement": "active",
