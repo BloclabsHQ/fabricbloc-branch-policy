@@ -66,7 +66,7 @@ class TestBranchPrune(unittest.TestCase):
             API=API,
             REPO=REPO,
             HYGIENE_MODE="live",
-            HYGIENE_C5_DRYRUN_ACK="wrong",
+            HYGIENE_C5_DRYRUN_ACK="",
             GITHUB_RUN_ID="run1",
         )
         Fake.routes[f"/repos/{REPO}"] = {"delete_branch_on_merge": True}
