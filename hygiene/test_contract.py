@@ -80,6 +80,11 @@ class TestHygieneContract(unittest.TestCase):
     def test_auto_merge_embed_synced(self):
         self._assert_embed_synced("hygiene-auto-merge", "auto_merge")
 
+    def test_branch_prune_embed_synced(self):
+        body = embedded("hygiene-branch-prune")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("branch_prune").rstrip("\n"))
+
     def test_top_level_permissions_empty(self):
         for stem in HYGIENE_WORKFLOWS:
             path = WF / f"{stem}.yml"
