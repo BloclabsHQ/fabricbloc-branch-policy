@@ -82,6 +82,21 @@ class TestHygieneContract(unittest.TestCase):
         doc = yaml.safe_load((WF / "hygiene-pr-ops-notify.yml").read_text())
         self.assertIn("workflow_call", workflow_on(doc))
 
+    def test_c1_schedule_reaches_sweep_without_plan(self):
+        doc = yaml.safe_load((WF / "hygiene-pr-ops-notify.yml").read_text())
+        jobs = doc.get("jobs") or {}
+        self.assertIn("sweep", jobs)
+        sweep = jobs["sweep"]
+        self.assertNotIn("needs", sweep)
+        cond = sweep.get("if") or ""
+        self.assertIn("github.event_name == 'schedule'", cond.replace("\n", " "))
+        self.assertIn("inputs.sweep", cond)
+        notify = jobs.get("notify") or {}
+        needs = notify.get("needs")
+        if isinstance(needs, str):
+            needs = [needs]
+        self.assertEqual(needs, ["plan"])
+
     def test_canon_hygiene_sha_when_present(self):
         import json
 
