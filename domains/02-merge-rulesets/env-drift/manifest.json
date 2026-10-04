@@ -1,0 +1,17 @@
+{
+  "_comment": "Policy inputs for MR-11 (ROLLOUT-ADDENDUM R4). Harnesses cite rule ID; do not copy checks into fabricbloc.",
+  "environments": {
+    "repo": "BloclabsHQ/fabricbloc",
+    "can_admins_bypass_must_be": false,
+    "exact_branch_policies": {
+      "agent-ops": {
+        "deployment_branch_policy": {
+          "protected_branches": false,
+          "custom_branch_policies": true
+        },
+        "branch_policies": [{ "name": "main", "type": "branch" }]
+      }
+    },
+    "prevent_self_review_when_reviewers": ["agent-ops"]
+  }
+}

@@ -37,11 +37,24 @@ def patch(workflow_stem, script_name):
     path = WF / f"{workflow_stem}.yml"
     if not path.exists():
         return False
+    body = indent_block(embed_body(script_name))
+    mark, endmark = "<<'PY'\n", "\n          PY"
     text = path.read_text()
-    start = text.index("<<'PY'\n") + len("<<'PY'\n")
-    end = text.rindex("\n          PY")
-    new = text[:start] + indent_block(embed_body(script_name)) + text[end:]
-    path.write_text(new)
+    if mark not in text:
+        return False
+    out, i = [], 0
+    while True:
+        j = text.find(mark, i)
+        if j < 0:
+            out.append(text[i:])
+            break
+        out.append(text[i : j + len(mark)])
+        k = text.find(endmark, j + len(mark))
+        if k < 0:
+            raise SystemExit(f"{path}: unclosed PY heredoc")
+        out.append(body)
+        i = k
+    path.write_text("".join(out))
     return True
 
 

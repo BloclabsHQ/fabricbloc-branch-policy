@@ -6,7 +6,11 @@
 import json, os, re, sys, urllib.error, urllib.parse, urllib.request
 
 SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
-TARGET_REPOS = {"BloclabsHQ/fabricbloc"}
+TARGET_REPOS = {
+    "BloclabsHQ/fabricbloc",
+    "BloclabsHQ/context",
+    "BloclabsHQ/keyflo-session-issuer",
+}
 DEFAULT_BASE_REF = "main"
 MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
 ENGINE_CONFIG = "agents/runtime/engine/config.yaml"
@@ -16,7 +20,21 @@ FLOOR_DENIED = [
     ".github/actions/", "decisions/", "architecture/decisions/",
     "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS",
 ]
-INCLUDE_PROPOSED = False  # flip to True (and re-pin) once FOUNDER-DECISIONS Q9 = yes
+# Q9 provider control surfaces (AG-04): warn-first; hard-fail via PROVIDER_CONTROL_ENFORCE=fail (see DECISIONS F6-D7).
+FLOOR_PROVIDER_CONTROL = [".cursor/", ".claude/"]
+# Remaining Q9 manifest proposed_additions (e.g. ops/): see DECISIONS.md F6-D7; flip after founder yes.
+INCLUDE_PROPOSED = False
+# AG-04 provider paths: warn first; set PROVIDER_CONTROL_ENFORCE=fail (workflow env) after one warn cycle.
+PROVIDER_CONTROL_ENFORCE = os.environ.get("PROVIDER_CONTROL_ENFORCE", "warn").strip().lower()
+# AG-05 projection: URL or pinned SHA/release asset; never parent checkout / submodule init.
+# Set PROJECTION_ENFORCE=fail (workflow env) after one warn cycle.
+PROJECTION_ENFORCE = os.environ.get("PROJECTION_ENFORCE", "warn").strip().lower()
+PROJECTION_PATTERNS = (
+    (re.compile(r"git\s+submodule\s+(update|init)", re.I), "git submodule init/update"),
+    (re.compile(r"submodule:\s*true", re.I), "actions checkout submodule: true"),
+    (re.compile(r"\.\./\.\./[A-Za-z0-9_.-]+"), "relative parent checkout path (../..)"),
+    (re.compile(r"uses:\s*\S+@[^\s#]*\bmain\b"), "reusable workflow pinned to @main not SHA"),
+)
 AGENT_USER_IDS = {199161495}
 AGENT_LOGINS = {"cursoragent"}
 AGENT_EMAILS = {
@@ -57,6 +75,15 @@ REPO = os.environ.get("REPO", "")
 def fail(msg):
     print(f"::error::{MODE}: {msg}")
     sys.exit(1)
+
+
+def projection_added_text(patch):
+    """AG-05 scans added lines only (+), not context or deletions."""
+    out = []
+    for ln in patch.splitlines():
+        if ln.startswith("+") and not ln.startswith("+++"):
+            out.append(ln[1:])
+    return "\n".join(out)
 
 
 def is_reviewer_app(login, user_id, bots):
@@ -263,8 +290,10 @@ def bootstrap_base_ref_allowlist():
     return BOOTSTRAP_BASE_REFS
 
 
-def pr_base_treated_as_main(base_ref):
-    """True when agent PR base is main or an exact bootstrap refs/heads/* entry (case-sensitive)."""
+def pr_base_treated_as_main(base_ref, default_branch):
+    """True when agent PR base is the repo default branch, `main`, or exact bootstrap ref."""
+    if default_branch and base_ref == default_branch:
+        return True, False
     if base_ref == DEFAULT_BASE_REF:
         return True, False
     full = f"refs/heads/{base_ref}"
@@ -287,8 +316,8 @@ def emit_bootstrap_base_warning(full_ref):
             pass
 
 
-def enforce_agent_pr_base_ref(base_ref):
-    ok, bootstrap = pr_base_treated_as_main(base_ref)
+def enforce_agent_pr_base_ref(base_ref, default_branch):
+    ok, bootstrap = pr_base_treated_as_main(base_ref, default_branch)
     if not ok:
         fail("agent PRs must target main")
     if bootstrap:
@@ -306,7 +335,7 @@ def ai_reviewers_from_cfg(cfg):
     return parsed
 
 
-def agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref):
+def agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref, default_branch):
     why = []
     if head_ref.lower().startswith("agent/"):
         why.append("agent/** head ref")
@@ -316,7 +345,7 @@ def agent_identity_reasons(head_ref, author, author_type, author_id, commits, ba
         if commit_node_agent_identity(c):
             why.append(f"agent commit identity on {c.get('sha', '')[:12]}")
             break
-    if base_ref == DEFAULT_BASE_REF:
+    if pr_base_treated_as_main(base_ref, default_branch)[0]:
         for c in commits:
             sha = c.get("sha")
             if sha and commit_came_from_agent_pr(sha):
@@ -325,14 +354,16 @@ def agent_identity_reasons(head_ref, author, author_type, author_id, commits, ba
     return why
 
 
-def agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref):
-    """Agent work: head ref, PR author, commits, Co-authored-by, or agent PR provenance on main."""
-    return bool(agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref))
+def agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref, default_branch):
+    """Agent work: head ref, PR author, commits, Co-authored-by, or agent PR provenance on gated base."""
+    return bool(agent_identity_reasons(
+        head_ref, author, author_type, author_id, commits, base_ref, default_branch))
 
 
-def gate_applies(head_ref, author, author_type, author_id, commits, base_ref,
+def gate_applies(head_ref, author, author_type, author_id, commits, base_ref, default_branch,
                  humans, ai_reviewers, reviewer_bots):
-    why = agent_identity_reasons(head_ref, author, author_type, author_id, commits, base_ref)
+    why = agent_identity_reasons(
+        head_ref, author, author_type, author_id, commits, base_ref, default_branch)
     if why:
         return True, why
     if is_reviewer_app(author, author_id, reviewer_bots):
@@ -410,6 +441,9 @@ def main():
     number = os.environ.get("PR", "")
     if not number.isdigit():
         fail("no pull request number in the event (only pull_request events are supported)")
+    default_branch = os.environ.get("REPO_DEFAULT_BRANCH", "").strip()
+    if not default_branch:
+        fail("REPO_DEFAULT_BRANCH is empty; workflow must set github.event.repository.default_branch")
     pr = call(f"/repos/{REPO}/pulls/{number}")
     event_head = os.environ.get("EVENT_HEAD_SHA", "")
     head, base_sha = pr["head"]["sha"], pr["base"]["sha"]
@@ -430,10 +464,10 @@ def main():
     commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS, fail_at_cap=True)
     if len(commits) != reported_commits:
         fail(f"commit count mismatch (PR says {reported_commits}, listed {len(commits)})")
-    if agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref):
-        enforce_agent_pr_base_ref(base_ref)
+    if agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref, default_branch):
+        enforce_agent_pr_base_ref(base_ref, default_branch)
     applies, why = gate_applies(
-        head_ref, author, author_type, author_id, commits, base_ref,
+        head_ref, author, author_type, author_id, commits, base_ref, default_branch,
         humans, ai_rev, reviewer_bots)
     if not applies:
         print(f"{MODE}: not gated ({why[0]}); human merge authority applies.")
@@ -462,11 +496,71 @@ def main():
         def hit(p, e):
             return p.startswith(e) if e.endswith("/") else (p == e or p.startswith(e))
 
+        if PROJECTION_ENFORCE not in ("warn", "fail"):
+            fail(f"PROJECTION_ENFORCE must be 'warn' or 'fail', got {PROJECTION_ENFORCE!r}")
+        if PROVIDER_CONTROL_ENFORCE not in ("warn", "fail"):
+            fail(f"PROVIDER_CONTROL_ENFORCE must be 'warn' or 'fail', got {PROVIDER_CONTROL_ENFORCE!r}")
+
+        missing_patch_denied = []
+        for f in files:
+            path = f["filename"]
+            if f.get("patch"):
+                continue
+            print(
+                f"::warning file={path}::no diff patch (binary or too large); "
+                "AG-05 cannot scan added lines"
+            )
+            if PROJECTION_ENFORCE == "fail" and any(hit(path, e) for e in denied):
+                missing_patch_denied.append(path)
+        if missing_patch_denied:
+            for p in sorted(missing_patch_denied):
+                print(
+                    f"::error file={p}::denied path with no diff patch "
+                    "(AG-04; PROJECTION_ENFORCE=fail)"
+                )
+            fail(f"{len(missing_patch_denied)} denied path(s) without diff patch")
+
         bad = sorted({p for p in paths for e in denied if hit(p, e)})
         for p in bad:
-            print(f"::error file={p}::denied path for agent PRs (ARCH-0048 decision 5)")
+            print(f"::error file={p}::denied path for agent PRs (ARCH-0048 decision 5 / AG-04)")
         if bad:
             fail(f"{len(bad)} denied path(s)")
+
+        provider_hits = sorted({p for p in paths for e in FLOOR_PROVIDER_CONTROL if hit(p, e)})
+        for p in provider_hits:
+            line = (
+                f"::error file={p}::provider control path for agent PRs (AG-04 / Q9)"
+                if PROVIDER_CONTROL_ENFORCE == "fail"
+                else f"::warning file={p}::provider control path for agent PRs (AG-04 / Q9) "
+                     f"(set PROVIDER_CONTROL_ENFORCE=fail to block)"
+            )
+            print(line)
+        if provider_hits and PROVIDER_CONTROL_ENFORCE == "fail":
+            fail(f"{len(provider_hits)} provider control path(s)")
+
+        proj = []
+        for f in files:
+            patch = f.get("patch") or ""
+            if not patch:
+                continue
+            added = projection_added_text(patch)
+            if not added:
+                continue
+            for pat, msg in PROJECTION_PATTERNS:
+                if pat.search(added):
+                    proj.append((f["filename"], msg))
+                    break
+        for path, msg in sorted(set(proj)):
+            line = (
+                f"::error file={path}::projection violation (AG-05): {msg}"
+                if PROJECTION_ENFORCE == "fail"
+                else f"::warning file={path}::projection violation (AG-05): {msg} "
+                     f"(set PROJECTION_ENFORCE=fail to block)"
+            )
+            print(line)
+        if proj and PROJECTION_ENFORCE == "fail":
+            fail(f"{len(set(proj))} projection violation(s)")
+
         print(f"{MODE}: {len(paths)} path(s), none denied.")
         return
 
