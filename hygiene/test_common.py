@@ -66,18 +66,18 @@ class TestManifestFailClosed(unittest.TestCase):
         return f"/repos/{REPO}/contents/{enc}"
 
     def test_missing_manifest_fails(self):
-        Fake.routes[self._manifest_path() + f"?ref={REF}"] = 404
+        Fake.routes[self._manifest_path()] = 404
         with self.assertRaises(SystemExit):
             self.common.fetch_manifest_denied(REPO, REF, mode="test-manifest")
 
     def test_invalid_json_fails(self):
-        Fake.routes[self._manifest_path() + f"?ref={REF}"] = "{not-json"
+        Fake.routes[self._manifest_path()] = "{not-json"
         with self.assertRaises(SystemExit):
             self.common.fetch_manifest_denied(REPO, REF, mode="test-manifest")
 
     def test_valid_manifest_ok(self):
         body = json.dumps({"denied_paths": {"arch_0048_baseline": [".github/workflows/"]}})
-        Fake.routes[self._manifest_path() + f"?ref={REF}"] = body
+        Fake.routes[self._manifest_path()] = body
         denied, never = self.common.fetch_manifest_denied(REPO, REF, mode="test-manifest")
         self.assertIn(".github/workflows/", denied)
 
