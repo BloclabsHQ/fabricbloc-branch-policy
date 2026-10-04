@@ -894,6 +894,29 @@ class T(unittest.TestCase):
         expected = {r.split("/", 1)[1] for r in load_gate_constants()["TARGET_REPOS"]}
         self.assertEqual(short, expected)
 
+    def test_canon_wallet_green_ci_contract(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        rs = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-wallet-green-ci")
+        self.assertEqual(rs.get("_founder_decision"), "WALLET-GREEN-CI")
+        self.assertEqual(rs.get("bypass_actors"), [])
+        self.assertEqual(
+            rs["conditions"]["repository_name"]["include"],
+            ["fabric-wallet"],
+        )
+        self.assertEqual(
+            rs["conditions"]["ref_name"]["include"],
+            ["refs/heads/dev", "refs/heads/main"],
+        )
+        pr_rule = next(r for r in rs["rules"] if r["type"] == "pull_request")
+        self.assertEqual(pr_rule["parameters"]["required_approving_review_count"], 0)
+        checks_rule = next(r for r in rs["rules"] if r["type"] == "required_status_checks")
+        params = checks_rule["parameters"]
+        self.assertTrue(params["strict_required_status_checks_policy"])
+        contexts = [c["context"] for c in params["required_status_checks"]]
+        self.assertEqual(contexts, ["Lint", "Security Scan", "Test", "Migration Checksum"])
+        for entry in params["required_status_checks"]:
+            self.assertEqual(entry["integration_id"], 15368)
+
     def test_canon_push_protected_paths_covers_workflows(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         rs = next(r for r in canon["repository_rulesets"]

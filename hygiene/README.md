@@ -14,6 +14,7 @@ Reusable workflows (pin each at `rulesets/canon.json` → `pins.hygiene_sha`):
 | C4 | `hygiene-ci-red.yml` |
 | C5 | `hygiene-branch-prune.yml` |
 | C6 | `hygiene-backlog-lint.yml` |
+| C7 | `hygiene-deploy-green-gate.yml` |
 
 Example caller:
 
