@@ -64,6 +64,7 @@ class TestHygieneContract(unittest.TestCase):
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("branch_prune").rstrip("\n"))
 
+
     def test_ci_red_embed_synced(self):
         body = embedded("hygiene-ci-red")
         self.assertIsNotNone(body)

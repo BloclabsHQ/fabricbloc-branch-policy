@@ -18,7 +18,7 @@
   "pins": {
     "agent_gates_sha": "ea32ff2b6f05b1a3635a764f7823ae4c4da129f0",
     "branch_name_guard_sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25",
-    "hygiene_sha": "66bdbc5ae637629f2643b6f16f05312199fe7593",
+    "hygiene_sha": "706108f68b6c53a90b070ea4b904d3433e5fce19",
     "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit."
   },
   "organization_rulesets": [
@@ -216,7 +216,7 @@
       "_repository": "fabricbloc",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B. Stops agents from creating a fresh ungated base branch (for example f6-gate-retarget-probe).",
-      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). dependabot/** is blocked until fabricbloc has dependabot.yml and a ruling re-adds the exemption. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). dependabot/** is blocked until fabricbloc has dependabot.yml and a ruling re-adds the exemption. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -252,7 +252,7 @@
       "_repository": "context",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B on BloclabsHQ/context (default branch main).",
-      "_comment": "Same shape as fabricbloc: block branch creation outside main, agent/**, and GOV-0022 handle paths. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Same shape as fabricbloc: block branch creation outside main, agent/**, and GOV-0022 handle paths. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -288,7 +288,7 @@
       "_repository": "keyflo-session-issuer",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B on BloclabsHQ/keyflo-session-issuer (default branch dev).",
-      "_comment": "Same as fabricbloc plus refs/heads/dev (repo default). Agent merge bases remain dev and main via canon-agent-gates. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Same as fabricbloc plus refs/heads/dev (repo default). Agent merge bases remain dev and main via canon-agent-gates. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -325,7 +325,7 @@
       "_repository": "fabricbloc",
       "name": "canon-deploy-branches-human-only",
       "_finding": "Finding (c). release/** and prod/** creation and direct updates are human-only (org admin break-glass).",
-      "_comment": "release/** and prod/** creation and direct updates are human-only. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "release/** and prod/** creation and direct updates are human-only. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
