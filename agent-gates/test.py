@@ -200,6 +200,19 @@ def deploy_human_only(canon):
     return next(r for r in canon["repository_rulesets"] if r["name"] == "canon-deploy-branches-human-only")
 
 
+CREATION_RESTRICTED_FORBIDDEN_EXCLUDES = frozenset({
+    "refs/heads/**",
+    "refs/heads/*",
+    "refs/heads/**/*",
+    "~ALL",
+})
+
+
+def exclude_would_cover_all_branches(pattern):
+    p = (pattern or "").strip()
+    return p in CREATION_RESTRICTED_FORBIDDEN_EXCLUDES
+
+
 def assert_creation_restricted_shape(canon):
     rs = creation_restricted(canon)
     assert rs.get("bypass_actors") == [], "creation-restricted bypass must be empty"
@@ -211,6 +224,8 @@ def assert_creation_restricted_shape(canon):
     assert "refs/heads/dependabot/**" not in exc
     for path in exc:
         assert "refs/heads/*/" not in path, f"wildcard handle exclude forbidden: {path}"
+        assert not exclude_would_cover_all_branches(path), (
+            f"creation-restricted exclude must not cover all branches: {path}")
     ns = load_gate_constants()
     for handle in ns["GOV_HUMAN_HANDLES"]:
         for typ in ns["HUMAN_BRANCH_TYPES"]:
@@ -704,6 +719,28 @@ class T(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("commits/pulls", out)
 
+    def test_commit_pulls_pagination_cap_fails_closed(self):
+        csha = "4" * 40
+        benign = {"head": {"ref": "madgeniusblink/feat/y"}, "user": {"login": "Madgeniusblink", "type": "User"}}
+        agent_pull = {"head": {"ref": "agent/autonomous/fix/x-i1-y"},
+                      "user": {"login": "Madgeniusblink", "type": "User"}}
+        pulls = [benign] * 500 + [agent_pull]
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main",
+              commit_pulls={csha: pulls})
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("pagination cap (500)", out)
+
+    def test_pr_commits_pagination_cap_fails_closed(self):
+        benign = commit()
+        commits = [benign] * 250
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=commits, ncommits=200)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("pagination cap (250)", out)
+
     def test_lineage_bot_pr_author_type_is_agent_provenance(self):
         csha = "3" * 40
         setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
@@ -742,6 +779,13 @@ class T(unittest.TestCase):
         import copy
         canon = copy.deepcopy(load_canon())
         creation_restricted(canon)["conditions"]["ref_name"]["include"] = ["refs/heads/main"]
+        with self.assertRaises(AssertionError):
+            assert_creation_restricted_shape(canon)
+
+    def test_mutation_creation_restricted_exclude_refs_heads_glob(self):
+        import copy
+        canon = copy.deepcopy(load_canon())
+        creation_restricted(canon)["conditions"]["ref_name"]["exclude"].append("refs/heads/**")
         with self.assertRaises(AssertionError):
             assert_creation_restricted_shape(canon)
 
@@ -842,7 +886,7 @@ class T(unittest.TestCase):
 
         def patch(body):
             body = body.replace(
-                "    pulls = paginate(path, MAX_COMMIT_PULLS)",
+                "    pulls = paginate(path, MAX_COMMIT_PULLS, fail_at_cap=True)",
                 "    pulls = call(path)\n    if not isinstance(pulls, list):\n        return False",
                 1,
             )
@@ -859,6 +903,32 @@ class T(unittest.TestCase):
         setup(ref="madgeniusblink/feat/x", files=(".github/workflows/a.yml",),
               commits=[commit(sha=csha)], base_ref="main")
         Fake.routes[f"/repos/BloclabsHQ/fabricbloc/commits/{csha}/pulls"] = {"not": "a list"}
+        code, out = run_gate_with_patch("agent-denied-paths", patch)
+        self.assertEqual(code, 0, out)
+
+    def test_mutation_commit_pulls_continues_at_cap_passes_human_skip(self):
+        csha = "4" * 40
+        benign = {"head": {"ref": "madgeniusblink/feat/y"}, "user": {"login": "Madgeniusblink", "type": "User"}}
+        agent_pull = {"head": {"ref": "agent/autonomous/fix/x-i1-y"},
+                      "user": {"login": "Madgeniusblink", "type": "User"}}
+        pulls = [benign] * 500 + [agent_pull]
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main",
+              commit_pulls={csha: pulls})
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("pagination cap (500)", out)
+
+        def patch(body):
+            return body.replace(
+                "pulls = paginate(path, MAX_COMMIT_PULLS, fail_at_cap=True)",
+                "pulls = paginate(path, MAX_COMMIT_PULLS)",
+                1,
+            )
+
+        setup(ref="madgeniusblink/feat/x", files=("docs/x.md",),
+              commits=[commit(sha=csha)], base_ref="main",
+              commit_pulls={csha: pulls})
         code, out = run_gate_with_patch("agent-denied-paths", patch)
         self.assertEqual(code, 0, out)
 

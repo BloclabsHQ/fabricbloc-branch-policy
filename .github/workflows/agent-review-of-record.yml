@@ -144,7 +144,7 @@ jobs:
               return body if accept.endswith(".raw") else json.loads(body or "null")
 
 
-          def paginate(path, cap):
+          def paginate(path, cap, fail_at_cap=False):
               out, page = [], 1
               while True:
                   sep = "&" if "?" in path else "?"
@@ -152,7 +152,11 @@ jobs:
                   if not isinstance(batch, list):
                       fail(f"unexpected API shape for {path}")
                   out += batch
-                  if len(batch) < 100 or len(out) >= cap:
+                  if len(out) >= cap:
+                      if fail_at_cap:
+                          fail(f"pagination cap ({cap}) reached for {path.split('?')[0]}; failing closed")
+                      return out
+                  if len(batch) < 100:
                       return out
                   page += 1
 
@@ -230,7 +234,7 @@ jobs:
 
           def commit_came_from_agent_pr(commit_sha):
               path = f"/repos/{REPO}/commits/{commit_sha}/pulls"
-              pulls = paginate(path, MAX_COMMIT_PULLS)
+              pulls = paginate(path, MAX_COMMIT_PULLS, fail_at_cap=True)
               for p in pulls:
                   if not isinstance(p, dict):
                       fail(f"unexpected API shape for commits/{commit_sha[:12]}/pulls entry")
@@ -434,7 +438,7 @@ jobs:
               reported_commits = int(pr.get("commits") or 0)
               if reported_commits >= MAX_COMMITS:
                   fail(f"PR has {reported_commits} commits (API cap {MAX_COMMITS}); cannot see them all")
-              commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS)
+              commits = paginate(f"/repos/{REPO}/pulls/{number}/commits", MAX_COMMITS, fail_at_cap=True)
               if len(commits) != reported_commits:
                   fail(f"commit count mismatch (PR says {reported_commits}, listed {len(commits)})")
               if agent_identity_in_pr(head_ref, author, author_type, author_id, commits, base_ref):
