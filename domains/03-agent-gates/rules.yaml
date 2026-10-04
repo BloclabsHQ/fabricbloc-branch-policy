@@ -1,0 +1,20 @@
+# Agent gate policy fragments (AG-*). Executable enforcement is embedded_gate.py @ pinned SHA.
+rules:
+  AG-04:
+    summary: "Agent PRs must not touch floor denied paths; .cursor/** and .claude/** warn-first"
+    floor_denied_prefixes:
+      - .github/workflows/
+      - agents/runtime/engine/
+    provider_control_prefixes:
+      - .cursor/
+      - .claude/
+    enforce_env: PROVIDER_CONTROL_ENFORCE
+    values:
+      warn: "Default for one cycle; emits ::warning annotations for provider control paths"
+      fail: "Blocks merge on .cursor/** and .claude/** after warn cycle"
+  AG-05:
+    summary: "Projection is URL or pinned SHA/release asset; not parent checkout or submodule init"
+    enforce_env: PROJECTION_ENFORCE
+    values:
+      warn: "Default for one cycle; emits ::warning annotations"
+      fail: "Blocks merge after warn cycle"

@@ -1,0 +1,42 @@
+# Cost class: schedule
+#
+# MR-11: live drift check for BloclabsHQ/fabricbloc deployment environments (R4).
+name: policy-env-drift
+
+on:
+  schedule:
+    - cron: "15 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fabricbloc-environments:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Mint fabricbloc-policy-audit installation token
+        id: audit
+        if: ${{ vars.POLICY_AUDIT_APP_ID != '' }}
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ vars.POLICY_AUDIT_APP_ID }}
+          private-key: ${{ secrets.POLICY_AUDIT_APP_PRIVATE_KEY }}
+          owner: BloclabsHQ
+          repositories: fabricbloc
+          permission-actions: read
+          permission-metadata: read
+      - name: Live environment drift (MR-11)
+        env:
+          POLICY_AUDIT_INSTALLATION_TOKEN: ${{ steps.audit.outputs.token }}
+        run: |
+          set -euo pipefail
+          if [ -n "${POLICY_AUDIT_INSTALLATION_TOKEN:-}" ]; then
+            python3 domains/02-merge-rulesets/env-drift/env_drift.py --live --strict-live
+          else
+            python3 domains/02-merge-rulesets/env-drift/env_drift.py --live
+          fi
