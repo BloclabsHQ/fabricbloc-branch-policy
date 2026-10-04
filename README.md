@@ -16,7 +16,7 @@ matrix against the workflow's embedded validator.
 # F6 enforcement: gates a PR cannot rewrite
 
 **DRAFT ONLY.** Nothing here has been pushed, applied or opened as a PR, and no GitHub setting was changed. No secret values were read.
-The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (pinned workflow SHA `e8a5985`, public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match. `rulesets/canon.json` `pins.*` and every `workflows[].sha` match `e8a5985f5ebf7b3795716b29fb3778e9842a3e25` until the next re-pin PR.
+The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match. `rulesets/canon.json` `pins.agent_gates_sha` is `ea32ff2b6f05b1a3635a764f7823ae4c4da129f0` (squash #20); both `canon-agent-gates` workflow SHAs match it. `pins.branch_name_guard_sha` remains `e8a5985f5ebf7b3795716b29fb3778e9842a3e25` until a branch-guard re-pin.
 Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281` (pushed 7:54 PM PT, after the 1ab108f revision the review cited), its files, the 4 Codex inline comments, the 1 conversation comment, the 1 review, and the live branch-policy tree and commits.
 
 ## Files
@@ -193,7 +193,7 @@ Org ruleset `canon-agent-gates` (org ruleset id **24445414**) enforces `agent-de
 
 **Post re-pin check (hosted runners):** On branch `f6-gate-test`, open one PR and confirm each org-required workflow run shows a GitHub-hosted runner (`runner_name` like `GitHub Actions …`, labels including `ubuntu-latest`) and completes (not stuck queued). If runs stay queued, revert the pin to `04a7d3a` and investigate billing/runner policy before retrying.
 
-**M6 probe (retarget gap, finding (c)):** After Cris re-pins org ruleset **24445414** to a gate SHA that includes the default-branch / `main` merge-base rule and widens `ref_name.include` to `~DEFAULT_BRANCH` + `refs/heads/main`:
+**M6 probe (retarget gap, finding (c)):** After Cris re-pins org ruleset **24445414** to a gate SHA that includes the default-branch / `main` merge-base rule and widens `ref_name.include` to `_post_rollout_ref_include` (`~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`):
 
 1. **(i) Ruleset B:** Manually verify an attended agent **cannot push** a new branch such as `probe/ungated-base` (not `main`, not `agent/**`, not `<handle>/<type>/<slug>`). Expect rejection from `canon-branch-creation-restricted`.
 2. **(ii) Retarget check:** Open or retarget an **agent/** PR so its base is `release/<name>` (or `prod/<name>`). Expect pinned `agent-denied-paths` / `agent-review-of-record` to run and **not** succeed (failure or missing checks before re-pin).
