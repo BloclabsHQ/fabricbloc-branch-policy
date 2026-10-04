@@ -20,7 +20,7 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 | Ruleset | Scope | Enforces | Bypass |
 |---|---|---|---|
 | `canon-agent-gates` | org → `fabricbloc`, `context`, `keyflo-session-issuer`; bootstrap: `refs/heads/f6-gate-test` only (`_bootstrap_ref_include`); after step 5 widen to `_post_rollout_ref_include` (`~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`) and clear `_bootstrap_ref_include` | Required workflows `agent-denied-paths`, `agent-review-of-record` from this repo @ pinned SHA (agent merge bases: repo `default_branch` or `main` from the event; bootstrap base allowance embedded from `_bootstrap_ref_include` at pin) | none |
-| `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8e6a8e` | none |
+| `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8a5985` (see `pins.branch_name_guard_sha`) | none |
 | `main-required-ci` | fabricbloc `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR with 0 approvals and squash only, 9 contexts pinned to Actions 15368 | OrganizationAdmin (`pull_request`) |
 | `canon-branch-creation-restricted` (finding c B) | fabricbloc `refs/heads/**` minus main, `agent/**`, explicit GOV-0022 handle paths (`dependabot/**` blocked until configured); excludes must not cover all branches (`refs/heads/**`, `~ALL`, etc.) | Blocks branch **creation** for non-exempt names | none (disable ruleset) |
 | `canon-deploy-branches-human-only` (finding c) | fabricbloc `release/**`, `prod/**` | Blocks **creation** and **update** | none (disable ruleset) |

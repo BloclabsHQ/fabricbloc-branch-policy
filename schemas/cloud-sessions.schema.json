@@ -71,7 +71,7 @@
             "properties": {
               "bot_id": { "type": "string" },
               "slots": { "type": "integer", "minimum": 1 },
-              "purpose": { "type": "string" }
+              "purpose": { "type": "string", "const": "product_hotfix" }
             }
           }
         }
@@ -89,7 +89,7 @@
       "type": "object",
       "required": ["idle_archive_hours", "triggers"],
       "properties": {
-        "idle_archive_hours": { "type": "integer", "minimum": 24 },
+        "idle_archive_hours": { "type": "integer", "const": 24 },
         "triggers": {
           "type": "array",
           "minItems": 1,
@@ -105,7 +105,7 @@
           "type": "array",
           "items": { "type": "string" }
         },
-        "route": { "type": "string" },
+        "route": { "type": "string", "const": "MadAgentPM -> Loom" },
         "loom_never_reviews_own_prs": { "const": true }
       }
     },
@@ -121,7 +121,9 @@
             "madengineer_in_flight_sessions": { "const": true },
             "branch_prefixes": {
               "type": "array",
-              "items": { "type": "string" }
+              "minItems": 1,
+              "maxItems": 1,
+              "items": { "type": "string", "const": "agent/autonomous/" }
             }
           }
         }
