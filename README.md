@@ -10,3 +10,149 @@ contains no secrets and the executable grammar is defined in that file only.
 
 Run `bash branch-name-guard/test.sh` to execute the accepted/rejected contract
 matrix against the workflow's embedded validator.
+
+---
+
+# F6 enforcement: gates a PR cannot rewrite
+
+**DRAFT ONLY.** Nothing here has been pushed, applied or opened as a PR, and no GitHub setting was changed. No secret values were read.
+The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (live main `e8e6a8e`, public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match.
+Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281` (pushed 7:54 PM PT, after the 1ab108f revision the review cited), its files, the 4 Codex inline comments, the 1 conversation comment, the 1 review, and the live branch-policy tree and commits.
+
+## Files
+
+| Path | What it is |
+|---|---|
+| `rulesets/canon.json` | Format v2. Declares every ruleset: 2 **org** rulesets (`canon-agent-gates`, optional `canon-branch-name-guard-pinned`) and 6 **repo** rulesets (`main-required-ci`, `canon-agent-branches`, `canon-provider-branches-blocked` Q12, `canon-autonomous-branch-creation` Q16, `canon-push-protected-paths` Q14, `policy-main-protected` for this repo). All 8 bodies validate against GitHub's published OpenAPI schema (`agent-gates/validate_canon.py`). |
+| `rulesets/README.md` | File format and apply rules |
+| `.github/workflows/agent-denied-paths.yml` | Pinned gate. Reads the changed files via `GET /pulls/{n}/files` and the denied list from the **base** commit via the contents API. No checkout, no PR code. |
+| `.github/workflows/agent-review-of-record.yml` | Pinned gate. Requires an independent, allowlisted APPROVE at the exact live head. API only. |
+| `agent-gates/test.py` | 27 contract tests against a local fake API, including the F6 case (agent PR edits the gate to `exit 0` → still fails). All pass. Also checks that both workflows embed byte-identical logic and that neither has a checkout. |
+| `agent-gates/validate_canon.py` | Validates `canon.json` bodies against the GitHub OpenAPI description |
+| `fabricbloc-side/.github/workflows/agent-review-rerun.yml` | Optional helper for fabricbloc: re-runs the pinned review check after a review. Convenience only; it can't make the check pass. |
+| `fabricbloc-side/CHANGES.md` | Required edits to PR #1526, including 2 bugs found in its newest head |
+| `DECISIONS.md` | Decisions for Cris, each with a default |
+
+## Threat model
+
+**Actors:** Cursor cloud agents (attended `agent/session/**` work, and engine `agent/autonomous/**` work dispatched by fabricbloc-agent-ops); any other App or PAT that can push to fabricbloc. **Assets:** `main` of fabricbloc, repo and org Actions secrets, and the gates themselves. **Trusted:** org owners; main of `fabricbloc-branch-policy` *at a pinned SHA*; main of fabricbloc *as base* (already gated).
+
+| # | Attack | Status before this draft |
+|---|---|---|
+| T1 | **F6.** Agent PR edits `.github/workflows/agent-denied-paths.yml` / `agent-review-of-record.yml` to `exit 0`. `pull_request` runs the workflow file from the PR merge commit, so the edited file runs. Reading the policy "from base" doesn't help, because the step that reads base is in the edited file. | open |
+| T2 | Agent PR *adds* any job named `agent-denied-paths`. A `required_status_checks` context is satisfied by any GitHub Actions (15368) check run with that name, so pinning the integration doesn't help. | open |
+| T3 | Agent avoids the gate's scope with a non-`agent/` branch name. | partly open (see `fabricbloc-side/CHANGES.md`) |
+| T4 | Agent pushes a new workflow (`on: push` or `pull_request`) to its own branch. It runs with fabricbloc's Actions secrets **before any merge gate**. | open. Not fixable by any required check. |
+| T5 | The same edit-to-pass trick against the other 9 required checks (canon-check, github-check, guard…) or the scripts they run | open |
+| T6 | Agent edits the source of the gates (`fabricbloc-branch-policy`) | the Cursor App should not be installed here (manifest `never_allowlist`), but nothing enforces that |
+| T7 | Cursor acts with an org admin's **user** token, so every OrganizationAdmin bypass applies to it. Evidence: PR #1526 was opened by `Madgeniusblink`; its commits are authored by the `cursoragent` user. Who pushed is not visible. | unknown |
+
+## Options compared
+
+| | (a) Org ruleset `workflows` rule, pinned SHA | (b) Push ruleset on paths | (c) `pull_request_target` check from base |
+|---|---|---|---|
+| Available on Team, private repos | **Yes.** Org rulesets reached Team on 2025-06-16, and the changelog names "requiring GitHub Actions workflows" [C1][C2]. The rule exists only at org level [C3]. **No Evaluate mode on Team**: the free/Team docs list only Active and Disabled [C4], so bootstrap uses a test branch. | **Yes.** Push rulesets are for private/internal repos on Team [C4][C5]. They don't exist for public repos, so they can't protect the public branch-policy repo. | Yes (plain Actions) |
+| Stops T1 / T2 | **Yes.** What runs comes from the source repo at `sha`. The PR's copy and same-named jobs don't satisfy the rule (TODO-VERIFY T2 in test M2). | T1 only for non-bypass pushers. T2 the same. | T1 yes, because it runs from the default branch [C6]. **T2 no:** a PR-added `pull_request` job with the same name still satisfies the context. |
+| Depends on pusher identity | **No.** No bypass actors. | **Yes.** With OrganizationAdmin bypass, it does nothing if Cursor pushes with an admin's token (T7). | No |
+| Stops T4 (secrets via agent-added workflow) | No | **Yes**, for non-bypass pushers | No |
+| Constraints | The source must be visible to the target: a public workflow runs on any repo in the org, private only on private [C3][C7]. It must declare `pull_request`/`pull_request_target`/`merge_group`. Filters are ignored and it runs only on `opened`/`synchronize`/`reopened`, so **a review does not re-trigger it** [C3]. It blocks direct pushes to the targeted branch, so only target PR-only branches [C3]. Rulesets created while a PR is open don't run on that PR until a new push or reopen [C8]. | 200 entries, fnmatch [C4]. Applies to the whole fork network. Bypass mode is effectively always. | Gets a write token and secrets by default. Checking out or running head code is the "pwn request" class (cache poisoning, secret theft) [C6][C9]. Runs as base context. |
+
+**Recommendation: layer both, in order. (a) first, (b) second.**
+- (a) `canon-agent-gates` is the actual F6 fix. It holds whoever pushes, and it is the only option that closes T2.
+- (b) `canon-push-protected-paths` (Q14) is the only control for T4 and T5. Ship it only after stage 1 proves Cursor pushes as the App (T7). Otherwise it does nothing against Cursor.
+- (c) is not recommended. It fixes T1 but not T2, and it adds secret exposure. Use it only as a fallback if the org turns out not to be on Team or Enterprise.
+
+## What each layer stops
+
+| Layer | T1 | T2 | T3 | T4 | T5 | T6 | T7 |
+|---|---|---|---|---|---|---|---|
+| (a) `canon-agent-gates` (org, no bypass, pinned SHA, default-deny scope) | ✅ | ✅ | ✅ unless Cursor commits under a human's identity | ❌ | ❌ (✅ for `guard / guard` with optional `canon-branch-name-guard-pinned`) | ✅ (pin) | ✅ |
+| `policy-main-protected` (branch-policy main: PR-only, admin-only update) | | | | | | ✅ | |
+| (b) Q14 `canon-push-protected-paths` | ✅ for non-admin pushers | ✅ same | | ✅ same | ✅ for listed scripts | | ❌ if Cursor acts as an admin |
+| Cursor App without `workflows` permission (native GitHub refusal) | ✅ for workflow files | ✅ | | ✅ | ❌ scripts | | ✅ (a user token from an App is capped by the App's permissions) |
+| Q12 provider prefixes blocked | | | hygiene | | | | |
+| Q16 autonomous-branch creation | | | provenance only | | | | |
+
+Residual risk with everything applied: if Cursor writes commits under Cris's own identity on a GOV-0022 human branch, nothing can tell it apart from Cris. Today Cursor commits as `cursoragent`, which the gate detects. The other 9 required checks still run PR-head code for anything outside the Q14 list (for example `Makefile`). Moving them into pinned org workflows is the follow-up.
+
+## Apply order (bootstrap without locking anyone out)
+
+No step needs a bypass, and no step can block the PR that applies the next one.
+0. **Read-only checks by Cris:** the plan is Team (Org → Settings → Billing and plans). Then the Cursor App permissions (section below). Then Cursor's push identity: on `https://github.com/BloclabsHQ/fabricbloc/activity?ref=agent/session/ci/cursor-env-policy`, see who pushed. Last, list existing org and repo rulesets. The branch-policy README says branch-name-guard is "selected by a GitHub ruleset", which suggests an org ruleset may already exist.
+1. **fabricbloc PR #1526**: apply `fabricbloc-side/CHANGES.md`, merge it, and run its live drift check after step 6. The gate goes live on main only at step 5, and #1526 touches `.github/workflows/`, so the order matters.
+2. **Repo admin**: apply `policy-main-protected` to fabricbloc-branch-policy. Cris stays able to merge via PR (OrganizationAdmin bypass in `pull_request` mode, 0 approvals). TODO-VERIFY that the merge box offers the bypass under the `update` rule.
+3. **Human PR from Cris** (branch `madgeniusblink/ci/f6-agent-gates`) to branch-policy adding `.github/workflows/agent-*.yml`, `agent-gates/`, `rulesets/`, and this README. Run `python3 agent-gates/test.py`. On its own repo the gates exit 0 by design (`SELF_REPO`). Merge, then record the squash SHA **S**. A second small PR writes S into `canon.json` `pins.agent_gates_sha` and both `workflows[].sha`.
+4. **Org owner** creates branch `f6-gate-test` in fabricbloc from main. Then create `canon-agent-gates` with `conditions.ref_name.include = ["refs/heads/f6-gate-test"]` (the `_bootstrap_ref_include`), via Org → Settings → Rules → Rulesets → Import, or `gh api -X POST orgs/BloclabsHQ/rulesets --input body.json`. Nothing that targets main is affected.
+5. Run the **malicious test** below against `f6-gate-test`. When it passes, change `ref_name.include` to `["~DEFAULT_BRANCH"]`. Ask authors of open PRs to push or reopen [C8]. Break-glass if the gate can't start (for example, runner trouble blocks all PRs to main): an org owner sets the ruleset to Disabled, which is audit-logged.
+6. Apply `main-required-ci` with **9** contexts. `agent-denied-paths` and `agent-review-of-record` are no longer status-check contexts. Remove or align classic branch protection on main.
+7. Optional, D6: `canon-branch-name-guard-pinned`, then drop `guard / guard` from `main-required-ci`.
+8. **Q12** at any time after confirming Cursor's branch-prefix setting. **Q14** only after the stage-1 identity test below. **Q16** only after submodule-bump moves off the PAT.
+9. Set the manifest `enforcement_boundary.required_workflow_ruleset.git_ref = S` (human PR), then run `cursor-env-drift` with `strict_live=true`. It must open no issue.
+
+The apply workflow comes later. It lives in branch-policy and calls the API with a company App that has org `administration: write`. It doesn't push, so `policy-main-protected` and Q14 never block it. That App must not be a bypass actor anywhere. The first apply is by hand (steps 2, 4, 6), because that App doesn't exist yet.
+
+## Verify: the malicious test PR (must fail)
+
+All against base `f6-gate-test` (step 5). Then repeat M1 once against `main` after the switch. Record the run URLs in the delivery issue.
+
+| # | PR | Expect |
+|---|---|---|
+| M1 | Head `agent/autonomous/test/f6-exit0-i0-probe`, attended Cursor. Replace fabricbloc's `.github/workflows/agent-denied-paths.yml` and `agent-review-of-record.yml` (add them if absent) with jobs of the **same names** that run `exit 0`. | The in-repo jobs go green. The ruleset's `agent-denied-paths` (source `fabricbloc-branch-policy@S`) goes **red** with `denied path … .github/workflows/agent-denied-paths.yml`. `agent-review-of-record` is red (no approval). Merge is blocked, including for an org owner. Neither `gh pr merge --admin` nor auto-merge succeeds. |
+| M2 | Same, but change only `docs/` and add one workflow with a job named `agent-denied-paths: exit 0` | The ruleset's denied-paths still fails (`.github/workflows/` is in the diff). This proves the T2 spoof doesn't satisfy the rule. |
+| M3 | Head `madgeniusblink/test/f6-spoof`, opened by Cris, with ≥1 commit from Cursor (`cursoragent`) touching `.github/workflows/` | Red (agent commit identity). |
+| M4 | Agent head, docs-only | denied-paths green, review red. Cris approves, then re-run (or the helper re-runs it): green. Push one more commit: red again. |
+| M5 | Cris's own human PR touching `.github/workflows/` | Both green ("not gated"). This is the no-lockout check. |
+
+`python3 agent-gates/test.py` encodes the same logic offline (27 cases).
+
+**Q14 identity test (before applying Q14 to main):** apply `canon-push-protected-paths` and have an attended Cursor agent push a one-line workflow edit to a scratch `agent/session/test/q14-probe-x` branch. **Rejected** means Cursor pushes as the App: keep Q14. **Accepted** means it pushed with an admin user token: set Q14 aside (it does nothing against Cursor) and rely on (a). Raise T7 with Cursor or move work to a service account.
+
+## Q12 / Q14 / Q16 interplay
+
+| | Depends on | Needed for F6? | Order |
+|---|---|---|---|
+| **Q12** block `cursor/` `codex/` `claude/` `qwen/` | Cursor's branch-prefix setting not being `cursor/`. #1526 used `agent/session/…`, so it looks customised, but confirm in the dashboard. | **No.** Before this draft the gates' scope keyed off the branch name. The pinned gates are default-deny, so Q12 is now hygiene. | Any time |
+| **Q14** push ruleset on workflow/engine/.cursor/CODEOWNERS/gate-script paths | Stage 1 proving Cursor pushes as the Cursor App, not with an admin's token. Its OrganizationAdmin bypass exempts admins. | **Now required to finish F6** (layer b). It is the only control for T4 (agent-added workflows read secrets) and T5 (other checks' scripts). It is *not* required for gate integrity: (a) holds without it. | After (a) is live and the Q14 identity test is rejected |
+| **Q16** only fabricbloc-agent-ops creates `agent/autonomous/**` | submodule-bump moving off the `FABRICBLOC_ACTION_AUTOMATION` PAT, or that PAT's owner being an org admin (TODO-VERIFY) | **No.** It was a scope concern only while the gates trusted branch names. It stays a provenance control. | Last, still held |
+
+Safe order: **(a) → main-required-ci 9 contexts → Q12 → Q14 (after the identity test) → Q16 (after the PAT migration).** Q14 and Q16 both rely on the identity question. If Cursor acts as an admin, Q14 is inert and Q16's admin bypass exempts it too. Only (a) has no bypass.
+
+## Cursor App `workflows` permission check (Cris, GitHub settings, read-only)
+
+1. Open `https://github.com/organizations/BloclabsHQ/settings/installations/161289381` (Org → Settings → GitHub Apps → Installed GitHub Apps → Cursor → Configure).
+2. Under **Permissions**, write down the exact level for **Workflows**, **Actions**, **Administration**, **Contents**, **Pull requests**, **Checks**, **Commit statuses** and **Secrets**. Under **Repository access**, note All vs Only select (Q1 wants select: fabricbloc).
+3. If a permission update request is pending, don't accept it without reading the diff.
+4. How to read it:
+   - Cursor's docs say the App requests "Actions and workflows" and "Administration" [C10], so expect `workflows: write` to be present.
+     - If present, a Cursor token can push workflow files, and only (a) plus Q14 stop the result.
+     - If absent, GitHub refuses App-token pushes touching `.github/workflows/` [C11]. That also covers user tokens minted by the App, which can't exceed the App's own permissions.
+   - Vendor permissions can't be reduced per org. The manifest's `permissions_must_not_include: [workflows, administration, actions]` will then always report drift. Record it as an accepted exception, with (a) and Q14 as the compensating controls, rather than leaving a permanent drift issue.
+5. While there, also confirm the Cursor App is **not** installed on `fabricbloc-branch-policy` (T6).
+
+## Doc citations
+
+- [C1] https://github.blog/changelog/2025-06-16-organization-rulesets-now-available-for-github-team-plans/ ("Team plan customers… requiring GitHub Actions workflows")
+- [C2] https://docs.github.com/en/organizations/managing-organization-settings/creating-rulesets-for-repositories-in-your-organization ("For customers on GitHub Team or GitHub Enterprise plans…")
+- [C3] https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-workflows-to-pass-before-merging (org-level only. Covers source visibility, supported events, filters ignored and default types only, and blocking direct pushes.) The free/Team version of this page doesn't list the rule. It points to org rulesets instead.
+- [C4] https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets (push rulesets for private/internal. Enforcement statuses Active/Disabled. Restrict file paths: fnmatch, 200 entries.)
+- [C5] https://github.blog/changelog/2024-09-10-push-rules-are-now-generally-available-and-updates-to-custom-properties/ ("Push rules are available on GitHub Team plans for private repositories")
+- [C6] https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target (runs from the default branch, and `pull_request` runs from the merge commit)
+- [C7] https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/troubleshooting-rules (source repository privacy settings)
+- [C8] the same troubleshooting page: "If you create a rule while a pull request is open, the required workflow will not run automatically"
+- [C9] https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target and https://securitylab.github.com/research/github-actions-preventing-pwn-requests
+- [C10] https://cursor.com/docs/integrations/github (permission table)
+- [C11] https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps#repository-permissions-for-workflows
+- REST schema for the `workflows` rule (`repository_id`, `path`, `ref`, `sha`, `do_not_enforce_on_create`): https://docs.github.com/en/rest/orgs/rules
+
+## Unverified (TODO-VERIFY)
+
+- That BloclabsHQ is actually on Team (assumed from the task). Also that the org-ruleset UI on Team offers "Require workflows to pass". The changelog says yes, but the Team docs page for available rules doesn't list it.
+- That a same-named PR job can't satisfy the `workflows` rule (M2 proves it).
+- Whether target-repo `vars` (FLEET_ENABLED) resolve in a ruleset-required run, and whether the fleet accepts it. The fallback is `ubuntu-latest`.
+- That `agent-review-rerun.yml` can find the ruleset run by name and re-run it with `GITHUB_TOKEN` (`actions: write`). The fallback is a manual "Re-run failed jobs".
+- Cursor App permission levels, and who actually pushes Cursor commits (App installation vs Cris's user token).
+- The bot login `fabricbloc-agent-ops[bot]`. The gate also catches any `[bot]` login or a `Bot` author type, so a wrong slug only matters for the review exclusion list.
+- That fnmatch patterns `dir/**/*` match files directly under `dir/` in push rulesets (Q14 identity test covers it).
+- Which files submodule-bump touches, and who owns the PAT (Q16, and whether Q14 blocks `.gitmodules` edits by it).
+- Existing live org and repo rulesets and classic protection. The connector has no rulesets endpoint.
+- Whether the `update` rule plus `pull_request`-mode admin bypass lets Cris merge on branch-policy without extra clicks.
