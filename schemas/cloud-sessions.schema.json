@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BloclabsHQ/fabricbloc-branch-policy/schemas/cloud-sessions.schema.json",
+  "title": "Cursor cloud session policy",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "policy_id",
+    "launch",
+    "caps",
+    "waits",
+    "archive",
+    "routing",
+    "phase_in"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "policy_id": { "type": "string", "const": "cursor-cloud-sessions" },
+    "calibrated_from": { "type": "string" },
+    "launch": {
+      "type": "object",
+      "required": ["work_key", "branch_name", "registry"],
+      "properties": {
+        "work_key": {
+          "type": "object",
+          "required": ["strategy", "never_relaunch_if_agent_exists"],
+          "properties": {
+            "strategy": { "const": "find_by_pr_then_reply" },
+            "never_relaunch_if_agent_exists": { "const": true }
+          }
+        },
+        "branch_name": {
+          "type": "object",
+          "required": ["session_branch_regex"],
+          "properties": {
+            "session_branch_regex": { "type": "string", "minLength": 10 },
+            "warden_branch_example": { "type": "string" }
+          }
+        },
+        "registry": {
+          "type": "object",
+          "required": ["recheck_and_claim_before_launch", "dedupe_after_launch"],
+          "properties": {
+            "recheck_and_claim_before_launch": { "const": true },
+            "dedupe_after_launch": { "const": true }
+          }
+        }
+      }
+    },
+    "caps": {
+      "type": "object",
+      "required": [
+        "max_concurrent_running",
+        "max_concurrent_per_bot",
+        "max_concurrent_per_repo",
+        "max_launches_per_hour",
+        "reserved_slots"
+      ],
+      "properties": {
+        "max_concurrent_running": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "max_concurrent_per_bot": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "max_concurrent_per_repo": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "max_launches_per_hour": { "type": "integer", "minimum": 1, "maximum": 24 },
+        "reserved_slots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["bot_id", "slots", "purpose"],
+            "properties": {
+              "bot_id": { "type": "string" },
+              "slots": { "type": "integer", "minimum": 1 },
+              "purpose": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "waits": {
+      "type": "object",
+      "required": ["max_in_agent_wait_seconds", "ci_polling_in_agent_forbidden"],
+      "properties": {
+        "max_in_agent_wait_seconds": { "type": "integer", "maximum": 120 },
+        "ci_polling_in_agent_forbidden": { "const": true }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "required": ["idle_archive_hours", "triggers"],
+      "properties": {
+        "idle_archive_hours": { "type": "integer", "minimum": 24 },
+        "triggers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "required": ["route", "loom_never_reviews_own_prs"],
+      "properties": {
+        "agent_harness_ticket_labels": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "route": { "type": "string" },
+        "loom_never_reviews_own_prs": { "const": true }
+      }
+    },
+    "phase_in": {
+      "type": "object",
+      "required": ["applies_to", "grandfather"],
+      "properties": {
+        "applies_to": { "const": "new_sessions_only" },
+        "grandfather": {
+          "type": "object",
+          "required": ["madengineer_in_flight_sessions", "branch_prefixes"],
+          "properties": {
+            "madengineer_in_flight_sessions": { "const": true },
+            "branch_prefixes": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "consumers": { "type": "object" }
+  }
+}
