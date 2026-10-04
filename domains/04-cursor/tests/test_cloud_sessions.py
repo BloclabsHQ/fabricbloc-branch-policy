@@ -56,6 +56,13 @@ class CloudSessionsPolicy(unittest.TestCase):
         triggers = set(self.data["archive"]["triggers"])
         self.assertTrue({"pr_merged", "pr_closed"} <= triggers)
 
+    def test_CU08_routing(self):
+        r = self.data["routing"]
+        self.assertIn("MadAgentPM", r["route"])
+        self.assertIn("Loom", r["route"])
+        labels = set(r.get("agent_harness_ticket_labels") or [])
+        self.assertTrue(labels & {"agent-harness", "cursor-harness", "session-economy"})
+
     def test_CU09_loom_review(self):
         self.assertTrue(self.data["routing"]["loom_never_reviews_own_prs"])
 
