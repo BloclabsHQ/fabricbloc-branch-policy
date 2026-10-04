@@ -11,7 +11,13 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 HYGIENE = Path(__file__).resolve().parent
-WORKFLOW_PATH = ".github/workflows/hygiene-branch-prune.yml"
+POLICY_WORKFLOW = (
+    "BloclabsHQ/fabricbloc-branch-policy/.github/workflows/hygiene-branch-prune.yml"
+)
+
+
+def policy_workflow_path(at_ref):
+    return f"{POLICY_WORKFLOW}@{at_ref}"
 
 
 def load(name):
@@ -63,11 +69,11 @@ REPO = "BloclabsHQ/fabricbloc"
 TOKEN = "t"
 
 
-def good_ack_run(ref="refs/heads/main"):
+def good_ack_run(at_ref="024c3adb251c555f8793f7af08dc80a963ba56de"):
     return {
         "status": "completed",
         "conclusion": "success",
-        "referenced_workflows": [{"path": WORKFLOW_PATH, "ref": ref}],
+        "referenced_workflows": [{"path": policy_workflow_path(at_ref)}],
     }
 
 
@@ -164,6 +170,18 @@ class TestVerifyDryrunAck(unittest.TestCase):
         url = f"https://github.com/{REPO}/actions/runs/{run_id}"
         self.mod.verify_dryrun_ack(TOKEN, REPO, url)
 
+    def test_accepts_branch_ref_in_full_path(self):
+        run_id = "88012"
+        Fake.routes[self._run_route(run_id)] = good_ack_run("refs/heads/main")
+        self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
+
+    def test_accepts_pin_sha_in_full_path(self):
+        run_id = "88013"
+        Fake.routes[self._run_route(run_id)] = good_ack_run(
+            "024c3adb251c555f8793f7af08dc80a963ba56de"
+        )
+        self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
+
     def test_rejects_malformed_ack(self):
         with self.assertRaises(SystemExit):
             self.mod.verify_dryrun_ack(TOKEN, REPO, "garbage")
@@ -173,7 +191,7 @@ class TestVerifyDryrunAck(unittest.TestCase):
         Fake.routes[self._run_route(run_id)] = {
             "status": "completed",
             "conclusion": "failure",
-            "referenced_workflows": [{"path": WORKFLOW_PATH, "ref": "refs/heads/main"}],
+            "referenced_workflows": [{"path": policy_workflow_path("refs/heads/main")}],
         }
         with self.assertRaises(SystemExit):
             self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
@@ -183,7 +201,7 @@ class TestVerifyDryrunAck(unittest.TestCase):
         Fake.routes[self._run_route(run_id)] = {
             "status": "completed",
             "conclusion": "cancelled",
-            "referenced_workflows": [{"path": WORKFLOW_PATH, "ref": "refs/heads/main"}],
+            "referenced_workflows": [{"path": policy_workflow_path("refs/heads/main")}],
         }
         with self.assertRaises(SystemExit):
             self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
@@ -193,17 +211,69 @@ class TestVerifyDryrunAck(unittest.TestCase):
         Fake.routes[self._run_route(run_id)] = {
             "status": "in_progress",
             "conclusion": None,
-            "referenced_workflows": [{"path": WORKFLOW_PATH, "ref": "refs/heads/main"}],
+            "referenced_workflows": [{"path": policy_workflow_path("refs/heads/main")}],
+        }
+        with self.assertRaises(SystemExit):
+            self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
+
+    def test_rejects_bare_workflow_path(self):
+        run_id = "88006"
+        Fake.routes[self._run_route(run_id)] = {
+            "status": "completed",
+            "conclusion": "success",
+            "referenced_workflows": [
+                {"path": ".github/workflows/hygiene-branch-prune.yml"},
+            ],
+        }
+        with self.assertRaises(SystemExit):
+            self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
+
+    def test_rejects_evil_org_policy_workflow_path(self):
+        run_id = "88014"
+        Fake.routes[self._run_route(run_id)] = {
+            "status": "completed",
+            "conclusion": "success",
+            "referenced_workflows": [
+                {
+                    "path": (
+                        "evil/fabricbloc-branch-policy/.github/workflows/"
+                        "hygiene-branch-prune.yml@deadbeef"
+                    ),
+                },
+            ],
+        }
+        with self.assertRaises(SystemExit):
+            self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
+
+    def test_rejects_bloclabs_wrong_workflow_file(self):
+        run_id = "88015"
+        Fake.routes[self._run_route(run_id)] = {
+            "status": "completed",
+            "conclusion": "success",
+            "referenced_workflows": [
+                {
+                    "path": (
+                        "BloclabsHQ/other/.github/workflows/hygiene-branch-prune.yml@main"
+                    ),
+                },
+            ],
         }
         with self.assertRaises(SystemExit):
             self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
 
     def test_rejects_wrong_referenced_workflow_path(self):
-        run_id = "88006"
+        run_id = "88016"
         Fake.routes[self._run_route(run_id)] = {
             "status": "completed",
             "conclusion": "success",
-            "referenced_workflows": [{"path": ".github/workflows/other.yml", "ref": "refs/heads/main"}],
+            "referenced_workflows": [
+                {
+                    "path": (
+                        "BloclabsHQ/fabricbloc-branch-policy/.github/workflows/"
+                        "other.yml@refs/heads/main"
+                    ),
+                },
+            ],
         }
         with self.assertRaises(SystemExit):
             self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
@@ -213,7 +283,7 @@ class TestVerifyDryrunAck(unittest.TestCase):
         Fake.routes[self._run_route(run_id)] = {
             "status": "completed",
             "conclusion": "success",
-            "referenced_workflows": [{"path": "", "ref": "refs/heads/main"}],
+            "referenced_workflows": [{"path": ""}],
         }
         with self.assertRaises(SystemExit):
             self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
@@ -223,17 +293,7 @@ class TestVerifyDryrunAck(unittest.TestCase):
         Fake.routes[self._run_route(run_id)] = {
             "status": "completed",
             "conclusion": "success",
-            "referenced_workflows": [{"ref": "refs/heads/main"}],
-        }
-        with self.assertRaises(SystemExit):
-            self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)
-
-    def test_rejects_missing_ref_on_matching_path(self):
-        run_id = "88009"
-        Fake.routes[self._run_route(run_id)] = {
-            "status": "completed",
-            "conclusion": "success",
-            "referenced_workflows": [{"path": WORKFLOW_PATH}],
+            "referenced_workflows": [{}],
         }
         with self.assertRaises(SystemExit):
             self.mod.verify_dryrun_ack(TOKEN, REPO, run_id)

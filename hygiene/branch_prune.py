@@ -17,6 +17,9 @@ ACK_URL_RE = re.compile(
 )
 POLICY_REPO = "BloclabsHQ/fabricbloc-branch-policy"
 WORKFLOW_PATH = ".github/workflows/hygiene-branch-prune.yml"
+REFERENCED_WORKFLOW_PATH_RE = re.compile(
+    r"(?i)BloclabsHQ/fabricbloc-branch-policy/\.github/workflows/hygiene-branch-prune\.yml@\S+"
+)
 
 
 def env(name, default=""):
@@ -120,16 +123,6 @@ def parse_ack_run_id(ack, current_repo):
     return m.group(1) if m else None
 
 
-def _canonical_policy_workflow_ref(entry):
-    path = entry.get("path")
-    if path != WORKFLOW_PATH:
-        return None
-    ref = entry.get("ref") or entry.get("sha")
-    if not ref:
-        return None
-    return f"{POLICY_REPO}/{path}@{ref}"
-
-
 def verify_dryrun_ack(token, repo, ack):
     run_id = parse_ack_run_id(ack, repo)
     if not run_id:
@@ -163,15 +156,8 @@ def verify_dryrun_ack(token, repo, ack):
         rw_path = rw.get("path")
         if not rw_path:
             fail(MODE, "live refused: referenced_workflow entry missing path")
-        if rw_path != WORKFLOW_PATH:
-            continue
-        canon = _canonical_policy_workflow_ref(rw)
-        if not canon:
-            fail(
-                MODE,
-                f"live refused: referenced workflow {rw_path!r} missing ref/sha",
-            )
-        policy_hits.append(canon)
+        if REFERENCED_WORKFLOW_PATH_RE.fullmatch(rw_path):
+            policy_hits.append(rw_path)
     if not policy_hits:
         fail(
             MODE,
