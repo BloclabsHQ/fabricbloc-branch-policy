@@ -142,7 +142,13 @@ def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", au
           changed=None, ncommits=None, renames=(), engine_config=None, base_ref="main",
           commit_pulls=None):
     commits = [commit()] if commits is None else commits
-    fl = [{"filename": f} for f in files] + [{"filename": n, "previous_filename": o} for o, n in renames]
+    fl = []
+    for f in files:
+        if isinstance(f, dict):
+            fl.append(f)
+        else:
+            fl.append({"filename": f})
+    fl += [{"filename": n, "previous_filename": o} for o, n in renames]
     routes = {
         "/repos/BloclabsHQ/fabricbloc/pulls/7": {"head": {"sha": head, "ref": ref},
                                                 "base": {"sha": BASE, "ref": base_ref},
@@ -418,9 +424,41 @@ class T(unittest.TestCase):
         setup(files=(".github/actions/x/action.yml",), manifest=None, **AGENT)
         self.assertEqual(run("agent-denied-paths")[0], 1)
 
-    def test_proposed_not_applied_by_default(self):
+    def test_cursor_and_claude_floor_denied(self):
         setup(files=(".cursor/environment.json",), **AGENT)
-        self.assertEqual(run("agent-denied-paths")[0], 0)
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+        setup(files=(".claude/settings.json",), **AGENT)
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+        setup(files=(".claude/hooks/guard.sh",), **AGENT)
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_projection_warn_does_not_fail(self):
+        setup(
+            files=({
+                "filename": "docs/projection.md",
+                "patch": "+see ../../fabricbloc/skills/foo for copy\n",
+            },),
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("::warning", out)
+        self.assertIn("AG-05", out)
+
+    def test_projection_fail_mode(self):
+        setup(
+            files=({"filename": "docs/projection.md",
+                    "patch": "+run git submodule update --init\n"},),
+            **AGENT,
+        )
+        env = dict(os.environ, PROJECTION_ENFORCE="fail")
+        p = subprocess.run(
+            [sys.executable, "-c", embedded("agent-denied-paths")],
+            env={**env, "MODE": "agent-denied-paths", "API": API, "GH_TOKEN": "test",
+                 "REPO": "BloclabsHQ/fabricbloc", "PR": "7", "EVENT_HEAD_SHA": HEAD},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
 
     def test_empty_diff_fails(self):
         setup(files=(), **AGENT)
