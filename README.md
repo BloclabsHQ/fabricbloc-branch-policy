@@ -42,15 +42,28 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 
 **Problem:** With `canon-agent-gates` scoped only to `~DEFAULT_BRANCH`, an agent PR **retargeted** to a fresh ungated base branch dropped the pinned org workflows — merge could bypass identity and denied-path checks.
 
-**Layer C (gate + org scope):** `main` is the only merge target agents may use. The pinned gate fails closed when the PR author or any commit carries agent identity and `base.ref != main` (`agent PRs must target main`). Org ruleset `canon-agent-gates` also targets `refs/heads/release/**` and `refs/heads/prod/**` so retargeting onto deploy branches still runs the pinned SHA checks. Merging any ungated branch into `main` remains a PR **to main** and gets the full diff plus identity checks.
+**Layer C (gate + org scope):** `main` is the only merge target agents may use. The pinned gate fails closed when the PR carries agent identity and `base.ref != main` (`agent PRs must target main`). Agent identity includes: **`agent/**` head ref** (regardless of commit author); PR author or any commit author/committer matching the pinned agent list; **`Co-authored-by:`** trailers with agent emails or known agent display names; and for PRs **to `main`**, any commit whose associated pull requests (`GET /commits/{sha}/pulls`) include an **`agent/**` head** or agent PR author (covers squash merges authored as a human after agent work). Org ruleset `canon-agent-gates` also targets `refs/heads/release/**` and `refs/heads/prod/**`. A follow-up human PR to `main` is **not** exempt merely because squash commits show a human author.
 
-**Layer B (`canon-branch-creation-restricted`):** Repo ruleset on fabricbloc blocks **creation** of branches outside `main`, `agent/**`, and GOV-0022 `<handle>/<type>/<slug>` patterns (see `branch-name-guard` `HUMAN_RE`). Scoped with `refs/heads/**` plus excludes (this policy file never uses `~ALL`). Stops agents from minting a fresh ungated base. Only **OrganizationAdmin** is a bypass actor; GitHub's API has no UI-only bypass mode — closest is `bypass_mode: always` (admin PAT/API can still bypass).
+**Layer B (`canon-branch-creation-restricted`):** Repo ruleset on fabricbloc blocks **creation** of branches outside `main`, `agent/**`, `dependabot/**`, and explicit GOV-0022 paths `refs/heads/<handle>/<type>/**` for each handle in `GOV_HUMAN_HANDLES` in `embedded_gate.py` (sourced from fabricbloc manifest `operators.members_expected` / GOV-0022 — today **`madgeniusblink`** only, not `refs/heads/*/<type>/**`). Scoped with `refs/heads/**` plus excludes (this policy file never uses `~ALL`). **No standing bypass** — break-glass: an org owner sets the ruleset to **Disabled** (audit log).
 
-**Deploy branches (`canon-deploy-branches-human-only`):** `refs/heads/release/**` and `refs/heads/prod/**` **creation** and **update** require a human (OrganizationAdmin bypass only, same API limitation).
+**Deploy branches (`canon-deploy-branches-human-only`):** `refs/heads/release/**` and `refs/heads/prod/**` **creation** and **update** are blocked with **no standing bypass** (same break-glass: disable the ruleset).
 
-**Break-glass:** There is **no** standing bypass on `canon-agent-gates`. An org owner sets that org ruleset to **Disabled** (org audit log). While it is disabled, fabricbloc `cursor-env` drift should open an issue.
+**Break-glass (rulesets B and deploy, and org gates):** There is **no** standing bypass on `canon-agent-gates`, `canon-branch-creation-restricted`, or `canon-deploy-branches-human-only`. An org owner sets the relevant ruleset to **Disabled** (org audit log). While `canon-agent-gates` is disabled, fabricbloc `cursor-env` drift should open an issue.
 
-**Residual risk:** A human can squash-merge an agent PR into an **existing** ungated branch — that launders agent identity into the base history. That is accepted as a deliberate human action, mitigated by the `base != main` gate rule and the PR template. A human can still merge agent work to `main` through the normal gated path.
+**Residual risk:** Deliberate human merge of agent work outside the detection above (for example rewriting history without linked PR metadata) remains a human accountability path, mitigated by PR template and org audit.
+
+**Branch prefix policy (fabricbloc, finding c inventory):**
+
+| Prefix / pattern | Creation | Rationale |
+|---|---|---|
+| `agent/**` | Allowed (exempt from creation-restricted) | Canonical agent work; gated by org workflows on merge targets |
+| `madgeniusblink/<type>/**` | Allowed | GOV-0022 human handle(s) from manifest / GOV-0022 |
+| `dependabot/**` | Allowed | Dependabot app-owned version bumps |
+| `cursor/**`, `codex/**`, `claude/**`, `qwen/**` | Blocked (`canon-provider-branches-blocked`, Q12) | Agents use `agent/**`, not provider-default prefixes |
+| `workboard/<hash>` | Blocked (creation-restricted) | Ephemeral workboard heads from automation; not a human handle or `agent/**` — use `agent/**` or a GOV-0022 handle branch |
+| `chore/index-regen-*` (legacy) | Blocked unless renamed | fabricbloc `index-regen.yml` must push `agent/autonomous/chore/index-regen-<run_id>` instead (see PR body; not edited here if workflow lives only in fabricbloc) |
+
+**M6 step (ii) retarget stale green:** Pinned gate workflows now declare `pull_request` type **`edited`** so changing the PR base re-runs the gate (contract test `test_gate_workflows_rerun_on_pull_request_edited`). After re-pin, retargeting an agent PR from `main` to `release/**` should re-run and stay red.
 
 **Reviewer App key:** The `fabricbloc-reviewer` GitHub App private key rotates every **180 days** (1Password); re-pin the gate SHA after any `REVIEWER_APP_BOTS` change.
 

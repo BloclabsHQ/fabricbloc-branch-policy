@@ -209,7 +209,7 @@
       "_repository": "fabricbloc",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B. Stops agents from creating a fresh ungated base branch (for example f6-gate-retarget-probe).",
-      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/*/<type>/** for each type in branch-name-guard HUMAN_RE. GitHub bypass_mode is only always|pull_request|exempt — there is no UI-only or block-API-token mode; closest is OrganizationAdmin with bypass_mode always (admin PAT/API can still bypass; humans use break-glass disable + audit log).",
+      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, dependabot/** (Dependabot app), and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). No standing bypass — break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -220,27 +220,22 @@
           "exclude": [
             "refs/heads/main",
             "refs/heads/agent/**",
-            "refs/heads/*/feat/**",
-            "refs/heads/*/fix/**",
-            "refs/heads/*/chore/**",
-            "refs/heads/*/docs/**",
-            "refs/heads/*/refactor/**",
-            "refs/heads/*/test/**",
-            "refs/heads/*/ci/**",
-            "refs/heads/*/perf/**",
-            "refs/heads/*/revert/**",
-            "refs/heads/*/build/**",
-            "refs/heads/*/style/**"
+            "refs/heads/dependabot/**",
+            "refs/heads/madgeniusblink/feat/**",
+            "refs/heads/madgeniusblink/fix/**",
+            "refs/heads/madgeniusblink/chore/**",
+            "refs/heads/madgeniusblink/docs/**",
+            "refs/heads/madgeniusblink/refactor/**",
+            "refs/heads/madgeniusblink/test/**",
+            "refs/heads/madgeniusblink/ci/**",
+            "refs/heads/madgeniusblink/perf/**",
+            "refs/heads/madgeniusblink/revert/**",
+            "refs/heads/madgeniusblink/build/**",
+            "refs/heads/madgeniusblink/style/**"
           ]
         }
       },
-      "bypass_actors": [
-        {
-          "actor_id": 1,
-          "actor_type": "OrganizationAdmin",
-          "bypass_mode": "always"
-        }
-      ],
+      "bypass_actors": [],
       "rules": [
         {
           "type": "creation"
@@ -251,7 +246,7 @@
       "_repository": "fabricbloc",
       "name": "canon-deploy-branches-human-only",
       "_finding": "Finding (c). release/** and prod/** creation and direct updates are human-only (org admin break-glass).",
-      "_comment": "Same bypass_mode limitation as canon-branch-creation-restricted; OrganizationAdmin always is the closest API option.",
+      "_comment": "release/** and prod/** creation and direct updates are human-only. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -263,13 +258,7 @@
           "exclude": []
         }
       },
-      "bypass_actors": [
-        {
-          "actor_id": 1,
-          "actor_type": "OrganizationAdmin",
-          "bypass_mode": "always"
-        }
-      ],
+      "bypass_actors": [],
       "rules": [
         {
           "type": "creation"
