@@ -1,0 +1,11 @@
+# Branch naming (BR-*). Normative text: GOV-0022 ADR (Aether) — BR-01.
+schema_version: 1
+rules:
+  BR-01:
+    summary: Agent and human branch grammar per GOV-0022 ADR
+    enforcer: .github/workflows/branch-name-guard.yml
+    canon: scripts/branch-name-policy.py
+  BR-04:
+    summary: Registered bot slugs (bots.json) for agent/<bot>/<type>/<scope>-<slug>
+    enforcer: branch-name-guard + rulesets/bots.json
+    note: session/autonomous reserved; provider prefixes invalid; attributed_bot is routing hint only

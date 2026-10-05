@@ -16,7 +16,7 @@ matrix against the workflow's embedded validator.
 # F6 enforcement: gates a PR cannot rewrite
 
 **DRAFT ONLY.** Nothing here has been pushed, applied or opened as a PR, and no GitHub setting was changed. No secret values were read.
-The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match. `rulesets/canon.json` `pins.agent_gates_sha` and `pins.hygiene_sha` are both `1ddbd5bc04e4d7afa69be602aceede299774624d` (re-pin after #44 fabricbloc-reviewer App pin); both `canon-agent-gates` workflow SHAs match `pins.agent_gates_sha`. `pins.branch_name_guard_sha` remains `e8a5985f5ebf7b3795716b29fb3778e9842a3e25` until a branch-guard re-pin.
+The tree mirrors `BloclabsHQ/fabricbloc-branch-policy` (public, repo id `1349282028`). `fabricbloc-side/` lists what `BloclabsHQ/fabricbloc` PR #1526 must change to match. `rulesets/canon.json` `pins.agent_gates_sha` is `ed19bddc0c79cd96349ec88a317a80b6743e61cf` (main after #57); both `canon-agent-gates` workflow SHAs match `pins.agent_gates_sha`. `pins.hygiene_sha` remains `1ddbd5bc04e4d7afa69be602aceede299774624d` until a hygiene re-pin. `pins.branch_name_guard_sha` is `80ee4b19ad84f4cdb5dc1e923e19f54fc54a2c6a` (main after #67/#68; bot-format `branch-name-guard` — fabricbloc thin caller must use the same SHA; see `branch-name-guard/README.md`).
 Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281` (pushed 7:54 PM PT, after the 1ab108f revision the review cited), its files, the 4 Codex inline comments, the 1 conversation comment, the 1 review, and the live branch-policy tree and commits.
 
 ## Files
@@ -178,7 +178,7 @@ Safe order: **(a) → main-required-ci 9 contexts → Q12 → Q14 (after the ide
 
 ## Runbook: required workflows vs decoy checks
 
-Org ruleset `canon-agent-gates` (org ruleset id **24445414**, **Active**, no bypass) enforces `agent-denied-paths` and `agent-review-of-record` from **this** repo at **pinned SHA** `1ddbd5bc04e4d7afa69be602aceede299774624d` (`rulesets/canon.json` → `workflows[].sha`), not from the PR branch. Target repositories: `fabricbloc`, `context`, `keyflo-session-issuer`. Org gate `ref_name.include`: `~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`. Agent merge bases use `REPO_DEFAULT_BRANCH` from the event plus `main`. Optional org ruleset `canon-branch-name-guard-pinned` pins the same way for `branch-name-guard` (fabricbloc only).
+Org ruleset `canon-agent-gates` (org ruleset id **24445414**, **Active**, no bypass) enforces `agent-denied-paths` and `agent-review-of-record` from **this** repo at **pinned SHA** `ed19bddc0c79cd96349ec88a317a80b6743e61cf` (`rulesets/canon.json` → `workflows[].sha`), not from the PR branch. Target repositories: `fabricbloc`, `context`, `keyflo-session-issuer`. Org gate `ref_name.include`: `~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`. Agent merge bases use `REPO_DEFAULT_BRANCH` from the event plus `main`. Optional org ruleset `canon-branch-name-guard-pinned` pins the same way for `branch-name-guard` (fabricbloc only).
 
 **Decoy checks.** A PR can add a repo-local workflow job with the same display name that exits 0. That green row is **not** the gate. The authoritative run is the one whose check details link to  
 `https://github.com/BloclabsHQ/fabricbloc/actions/required_workflows/<ruleset-workflow-id>`  
@@ -201,7 +201,9 @@ Org ruleset `canon-agent-gates` (org ruleset id **24445414**, **Active**, no byp
 
 ## Reviewer GitHub App (`fabricbloc-reviewer`)
 
-The pinned gate treats every `[bot]` login as an agent for approvals, except entries in the **pinned constant** `REVIEWER_APP_BOTS` in `agent-gates/embedded_gate.py` (synced into both gate workflows). Each entry is `(login, numeric_user_id)` from `GET /users/fabricbloc-reviewer%5Bbot%5D`. Until Cris creates the App and re-pins, the set is **empty** (fail closed: no App approval can count).
+The pinned gate treats every `[bot]` login as an agent for approvals, except entries in the **pinned constant** `REVIEWER_APP_BOTS` in `agent-gates/embedded_gate.py` (synced into both gate workflows). Each entry is `(login, numeric_user_id)` from `GET /users/fabricbloc-reviewer%5Bbot%5D` (live bot id **337673700** after PR #44 pin).
+
+**PR-D2 (GOV-0033 D1 amendment):** org **`canon-agent-gates`** also sets GitHub **`required_approving_review_count: 1`** so auto-merge can complete when the App posts APPROVE. Agent workflow enforcement remains **`agent-review-of-record`**; see `docs/PR-D2-gov-0033-d1-amendment.md`.
 
 An App approval counts only when:
 
@@ -226,7 +228,7 @@ Create the App in the BloclabsHQ org settings. It must not appear on any ruleset
 | Where can this GitHub App be installed? | **Only on this account** |
 | Installation | **fabricbloc only** — never install on `fabricbloc-branch-policy` |
 
-**Private key (hard rule):** The reviewer App private key is **never** stored as a GitHub Actions secret — not in this repo, not in org secrets, and not in environment secrets. It lives only in **Cris's personal 1Password vault** and is used through his **local CLI** when posting reviews.
+**Private key (Actions):** Store **`REVIEWER_APP_PRIVATE_KEY`** and **`REVIEWER_APP_CLIENT_ID`** only in environment **`reviewer`** on gated repos. Deployment rules: **`main` only** — **must not** match `refs/pull/*`. Split workflow: gate job on **`pull_request`** (no secrets); mint/approve on **`pull_request_target`** + env **`reviewer`** (API-only). See `docs/REVIEWER-IDENTITY.md`.
 
 **After creation:**
 
@@ -235,7 +237,7 @@ Create the App in the BloclabsHQ org settings. It must not appear on any ruleset
 3. Add the bot login to `ai_reviewers` in fabricbloc `agents/runtime/engine/config.yaml` via a **human PR only** — that path is denied for agent PRs (`agent-denied-paths`).
 4. Run **M6** (`agent-gates/probes/m6_retarget.sh`) on an agent PR retargeted to `release/**` and record outcomes for (i) and (ii).
 
-**Private key rotation:** Rotate the reviewer App key every **180 days**; update 1Password only (never Actions secrets). Re-pin org ruleset **24445414** after any gate constant change.
+**Private key rotation:** Rotate the reviewer App key every **180 days**; update the **`reviewer`** environment secret on each gated repo (and 1Password). Re-pin org ruleset **24445414** after any gate constant change.
 
 ## Unverified (TODO-VERIFY)
 

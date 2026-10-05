@@ -19,9 +19,9 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 
 | Ruleset | Scope | Enforces | Bypass |
 |---|---|---|---|
-| `canon-agent-gates` | org → `fabricbloc`, `context`, `keyflo-session-issuer`; `ref_name.include`: `~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**` (live retarget 2026-10-04 PT, ruleset **24445414**) | Required workflows `agent-denied-paths`, `agent-review-of-record` @ `1ddbd5b` (agent merge bases: repo `default_branch` or `main`) | none |
-| `canon-wallet-green-ci` (`WALLET-GREEN-CI`, **draft — do not apply**) | org → `fabric-wallet`; `ref_name.include`: `refs/heads/dev`, `refs/heads/main` | PR required; strict status checks `Lint`, `Security Scan`, `Test`, `Migration Checksum` @ Actions **15368**; 0 reviews | none |
-| `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ `e8a5985` (see `pins.branch_name_guard_sha`) | none |
+| `canon-agent-gates` | org → `fabricbloc`, `context`, `keyflo-session-issuer`; `ref_name.include`: `~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**` (live retarget 2026-10-04 PT, ruleset **24445414**) | Required workflows `agent-denied-paths`, `agent-review-of-record` @ pin; **`pull_request`** with **1** approving review (PR-D2 / GOV-0033 D1 amendment — App **337673700** for agent PRs). See `docs/PR-D2-gov-0033-d1-amendment.md`. | none |
+| `canon-wallet-green-ci` (`WALLET-GREEN-CI`, **apply after PR #47 merge**) | org → `fabric-wallet`; `ref_name.include`: `refs/heads/dev`, `refs/heads/main` | PR required; strict status checks `Lint`, `Security Scan`, `Test`, `Migration Checksum` @ Actions **15368**; 0 reviews | none |
+| `canon-branch-name-guard-pinned` (F6-D6) | org → fabricbloc `~DEFAULT_BRANCH` | Required workflow `branch-name-guard` @ pin (`pins.branch_name_guard_sha`; re-pin to post-merge main tip with bot-format guard — same SHA as fabricbloc thin caller) | none |
 | `main-required-ci` | fabricbloc `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR with 0 approvals and squash only, 9 contexts pinned to Actions 15368 | OrganizationAdmin (`pull_request`) |
 | `canon-branch-creation-restricted` (finding c B) | fabricbloc `refs/heads/**` minus main, `agent/**`, explicit GOV-0022 handle paths (`dependabot/**` blocked until configured); excludes must not cover all branches (`refs/heads/**`, `~ALL`, etc.) | Blocks branch **creation** for non-exempt names | none (disable ruleset) |
 | `canon-branch-creation-restricted` | context — same exempt set as fabricbloc (default **main**) | Blocks branch **creation** outside main, `agent/**`, and GOV-0022 handle paths | none (disable ruleset) |
@@ -43,7 +43,7 @@ Recorded deltas so cursor-env / manual audits do not treat intentional live stat
 
 | Live ruleset | ID | Note |
 |---|---|---|
-| `canon-agent-gates` (org) | 24445414 | **Active**, no bypass. Repos: `fabricbloc`, `context`, `keyflo-session-issuer`. `ref_name.include` matches canon (four entries). Live workflow refs @ `1ddbd5bc04e4d7afa69be602aceede299774624d`, matching canon (applied and reload-verified **2026-10-04 PT**, MadAgentPM). Retarget applied **2026-10-04 PT** (MadAgentPM). |
+| `canon-agent-gates` (org) | 24445414 | **Active**, no bypass. Repos: `fabricbloc`, `context`, `keyflo-session-issuer`. `ref_name.include` matches canon (four entries). Live workflow refs @ `1ddbd5bc04e4d7afa69be602aceede299774624d` until org ruleset **24445414** is updated to `ed19bddc0c79cd96349ec88a317a80b6743e61cf` (canon after #57 / post–#57 re-pin PR). Retarget applied **2026-10-04 PT** (MadAgentPM). |
 | `main-required-ci` (fabricbloc) | 20436874 | **Require branches to be up to date before merging** is **OFF**, matching `canon.json` `strict_required_status_checks_policy: false`. The **six** required status check contexts are unchanged from the pre-toggle set. **Merge queue** is not available on GitHub Team for private repos (documented limitation; not in canon). |
 
 **Policy ownership:** Changes to org gate targeting (`TARGET_REPOS` in `agent-gates/embedded_gate.py`, `canon-agent-gates` `repository_name` in `canon.json`) are owned by **Warden** (FabricBloc tech-policy owner bot). Human CODEOWNERS review stays unchanged.

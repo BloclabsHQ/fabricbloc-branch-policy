@@ -8,7 +8,7 @@ PRs **#1433** and **#1435** merged into `dev` while CI was red or still running.
 
 ## Org ruleset (canon draft)
 
-Org ruleset **`canon-wallet-green-ci`** (not applied until `WALLET-GREEN-CI` founder decision):
+Org ruleset **`canon-wallet-green-ci`** (founder yes **WALLET-GREEN-CI** recorded 2026-10-05 01:01 PT; apply after policy PR **#47** merges):
 
 | Item | Value |
 |---|---|
