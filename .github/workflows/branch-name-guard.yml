@@ -66,7 +66,7 @@ jobs:
           AGENT_PROVIDER_PREFIX_RE = re.compile(r"^agent/(codex|claude|qwen|cursor)/.+$")
           # Embedded from rulesets/canon.json (re-pin with branch_name_guard_sha when bots.json changes on main).
           CANON_LEGACY_BRANCH_PR_CREATED_BEFORE = "2026-10-19T00:00:00Z"
-          CANON_BOTS_JSON_SHA = "e8a5985f5ebf7b3795716b29fb3778e9842a3e25"
+          CANON_BOTS_JSON_SHA = "80ee4b19ad84f4cdb5dc1e923e19f54fc54a2c6a"
           SYNCED_BOT_SLUGS = ['aether', 'anvil', 'cursoragent', 'loom', 'madagentpm', 'madengineer', 'madgeniusbot', 'sentinel', 'sweeper', 'warden']  # auto-sync from rulesets/bots.json
           API = os.environ.get("API", "https://api.github.com").rstrip("/")
 
