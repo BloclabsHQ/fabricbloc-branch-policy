@@ -1,13 +1,43 @@
 {
-  "_comment": "Fallback routing when fabricbloc-reviewer App cannot auto-approve. Path globs use fnmatch (** supported).",
+  "_comment": "Fallback routing when fabricbloc-reviewer App cannot auto-approve. Path globs use fnmatch (** supported). Highest priority wins.",
+  "verdict_approval_enabled": false,
   "default_reviewer": "madagentpm",
-  "trusted_verdict_logins": [
-    "madgeniusblink",
-    "cursoragent"
+  "trusted_verdict_identities": [
+    {
+      "login": "madgeniusblink",
+      "user_id": 42707764
+    },
+    {
+      "login": "cursoragent",
+      "user_id": 199161495
+    }
   ],
   "routes": [
     {
-      "id": "wallet-auth-crypto-secrets",
+      "id": "cris-prod-iam-secrets",
+      "priority": 300,
+      "path_globs": [
+        "secrets/**",
+        "**/secrets/**",
+        "**/iam/**",
+        "**/prod/**"
+      ],
+      "reviewer": "madagentpm",
+      "cris_required": true,
+      "sensitive": true
+    },
+    {
+      "id": "fabricbloc-src-auth",
+      "priority": 260,
+      "path_globs": [
+        "src/auth/**"
+      ],
+      "reviewer": "sentinel",
+      "sensitive": true
+    },
+    {
+      "id": "fabric-wallet-sensitive",
+      "priority": 250,
       "repos": [
         "fabric-wallet"
       ],
@@ -16,36 +46,41 @@
         "**/crypto/**",
         "**/secrets/**"
       ],
-      "reviewer": "sentinel"
+      "reviewer": "sentinel",
+      "sensitive": true
     },
     {
-      "id": "iac-infra",
+      "id": "auth-crypto-any-repo",
+      "priority": 240,
       "path_globs": [
-        "iac/**",
-        "infra/**",
-        "**/*.tf"
+        "**/auth/**",
+        "**/crypto/**"
       ],
-      "reviewer": "aether"
+      "reviewer": "sentinel",
+      "sensitive": true
     },
     {
       "id": "policy-workflows",
+      "priority": 230,
       "path_globs": [
         ".github/workflows/**",
         "rulesets/**",
         "policy/**",
         "**/canon.json"
       ],
-      "reviewer": "warden"
+      "reviewer": "warden",
+      "sensitive": true
     },
     {
-      "id": "prod-iam-secrets",
+      "id": "iac-infra",
+      "priority": 220,
       "path_globs": [
-        "**/prod/**",
-        "**/iam/**",
-        "**/secrets/**"
+        "iac/**",
+        "infra/**",
+        "**/*.tf"
       ],
-      "reviewer": "madagentpm",
-      "cris_required": true
+      "reviewer": "aether",
+      "sensitive": true
     }
   ]
 }

@@ -62,7 +62,10 @@ VERDICT_RE = re.compile(
     r"sha=(?P<sha>[0-9a-f]{40})\s*-->",
     re.IGNORECASE,
 )
+CODE_FENCE_RE = re.compile(r"```(?:[^\n]*\n)?.*?```", re.DOTALL)
 REVIEWERS_JSON = "rulesets/reviewers.json"
+CANON_JSON = "rulesets/canon.json"
+MAX_ISSUE_COMMENTS = 10000
 HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
 MAX_FILES = 3000   # pulls/{n}/files hard limit
 MAX_COMMITS = 250  # pulls/{n}/commits hard limit
@@ -410,19 +413,31 @@ def approval_qualifies(review, head, allow, excluded, reviewer_bots):
     return False
 
 
-def policy_canon_json(path):
+def policy_repo_file(path, ref):
     q = urllib.parse.quote(path)
     raw = call(
-        f"/repos/{SELF_REPO}/contents/{q}?ref=main",
+        f"/repos/{SELF_REPO}/contents/{q}?ref={ref}",
         accept="application/vnd.github.raw",
         allow_404=True,
     )
     if raw is None:
-        fail(f"missing canon file {path} on {SELF_REPO}")
+        fail(f"missing policy file {path} on {SELF_REPO}@{ref[:12]}")
     try:
         return json.loads(raw)
     except ValueError:
-        fail(f"{path} on {SELF_REPO} is not valid JSON")
+        fail(f"{path} on {SELF_REPO}@{ref[:12]} is not valid JSON")
+
+
+def policy_reviewers_ref():
+    canon = policy_repo_file(CANON_JSON, "main")
+    ref = (canon.get("pins") or {}).get("agent_gates_sha") or "main"
+    return ref.strip() or "main"
+
+
+def load_reviewers_config():
+    """Never read reviewers.json from the PR head; use pinned policy SHA or main."""
+    ref = policy_reviewers_ref()
+    return policy_repo_file(REVIEWERS_JSON, ref)
 
 
 def path_matches_glob(path, pattern):
@@ -438,9 +453,12 @@ def path_matches_glob(path, pattern):
 
 def classify_review_routes(repo_full, paths, cfg):
     short = repo_full.split("/", 1)[-1] if "/" in repo_full else repo_full
-    reviewer = cfg.get("default_reviewer") or "madagentpm"
+    default = cfg.get("default_reviewer") or "madagentpm"
+    reviewer = default
     cris = False
+    sensitive = False
     matched = False
+    best_prio = -1
     for route in cfg.get("routes") or []:
         repos = route.get("repos")
         if repos and short not in repos:
@@ -448,31 +466,109 @@ def classify_review_routes(repo_full, paths, cfg):
         globs = route.get("path_globs") or []
         if not globs:
             continue
+        prio = int(route.get("priority") or 0)
+        route_hit = False
         for p in paths:
             if any(path_matches_glob(p, g) for g in globs):
-                matched = True
-                reviewer = route.get("reviewer") or reviewer
-                if route.get("cris_required"):
-                    cris = True
+                route_hit = True
                 break
-        if matched:
-            break
-    return reviewer, cris, matched
+        if not route_hit:
+            continue
+        if prio >= best_prio:
+            best_prio = prio
+            matched = True
+            reviewer = route.get("reviewer") or default
+            cris = bool(route.get("cris_required"))
+            sensitive = bool(route.get("sensitive")) or cris or reviewer != default
+    return reviewer, cris, sensitive, matched
 
 
-def find_trusted_verdict(number, head, cfg):
-    trusted = {x.lower() for x in (cfg.get("trusted_verdict_logins") or [])}
-    comments = paginate(f"/repos/{REPO}/issues/{number}/comments", 100)
+def trusted_verdict_identities(cfg):
+    out = set()
+    for entry in cfg.get("trusted_verdict_identities") or []:
+        if not isinstance(entry, dict):
+            continue
+        login = (entry.get("login") or "").strip().lower()
+        uid = entry.get("user_id")
+        if login and uid is not None:
+            try:
+                out.add((login, int(uid)))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def is_trusted_verdict_author(user, cfg):
+    login = ((user or {}).get("login") or "").strip().lower()
+    uid = (user or {}).get("id")
+    if not login or uid is None:
+        return False
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return False
+    return (login, uid) in trusted_verdict_identities(cfg)
+
+
+def body_without_code_fences(text):
+    return CODE_FENCE_RE.sub("", text or "")
+
+
+def issue_comment_edited(c):
+    return (c.get("created_at") or "") != (c.get("updated_at") or "")
+
+
+def parse_verdict_from_comments(comments, head, expected_reviewer, excluded_logins, cfg):
+    """Trusted PASS markers only outside fences; login+id; not from PR participants."""
+    if not cfg.get("verdict_approval_enabled"):
+        return None, None
+    expected = (expected_reviewer or "").lower()
+    excluded = {x.lower() for x in excluded_logins if x}
     for c in reversed(comments):
-        body = c.get("body") or ""
+        if issue_comment_edited(c):
+            continue
+        user = c.get("user") or {}
+        login = (user.get("login") or "").lower()
+        if login in excluded:
+            continue
+        if not is_trusted_verdict_author(user, cfg):
+            continue
+        body = body_without_code_fences(c.get("body") or "")
         m = VERDICT_RE.search(body)
         if not m or m.group("sha") != head:
             continue
-        login = ((c.get("user") or {}).get("login") or "").lower()
-        if login not in trusted:
+        if m.group("reviewer").lower() != expected:
             continue
-        return m.group("reviewer").lower(), login
+        return expected, login
     return None, None
+
+
+def find_trusted_verdict(number, head, expected_reviewer, excluded_logins, cfg):
+    comments = paginate(f"/repos/{REPO}/issues/{number}/comments", MAX_ISSUE_COMMENTS)
+    return parse_verdict_from_comments(comments, head, expected_reviewer, excluded_logins, cfg)
+
+
+def agent_denied_paths_successful(head):
+    page = 1
+    found = False
+    while True:
+        batch = call(
+            f"/repos/{REPO}/commits/{head}/check-runs?per_page=100&page={page}"
+        )
+        if not isinstance(batch, dict):
+            fail("unexpected API shape for commits/check-runs")
+        runs = batch.get("check_runs") or []
+        for r in runs:
+            if r.get("name") != "agent-denied-paths":
+                continue
+            found = True
+            if r.get("status") != "completed":
+                return False
+            return r.get("conclusion") == "success"
+        if len(runs) < 100:
+            break
+        page += 1
+    return False
 
 
 def post_issue_comment(number, body, token=None):
@@ -498,8 +594,9 @@ def submit_reviewer_app_approve(number, head, app_token, reviewer_slug):
     )
 
 
-def try_reviewer_automation(number, head, paths, cfg):
-    reviewer, cris, _matched = classify_review_routes(REPO, paths, cfg)
+def try_reviewer_automation(number, head, paths, cfg, excluded_logins):
+    reviewer, cris, sensitive, _matched = classify_review_routes(REPO, paths, cfg)
+    default = cfg.get("default_reviewer") or "madagentpm"
     if cris:
         post_issue_comment(
             number,
@@ -508,8 +605,24 @@ def try_reviewer_automation(number, head, paths, cfg):
             f"Routed reviewer: `{reviewer}`.",
         )
         fail("cris_required path class; App auto-approve blocked")
-    verdict_reviewer, verdict_author = find_trusted_verdict(number, head, cfg)
     app_token = os.environ.get("REVIEWER_APP_TOKEN", "").strip()
+    deterministic = (
+        reviewer == default
+        and not sensitive
+        and not cris
+        and agent_denied_paths_successful(head)
+    )
+    if deterministic and app_token:
+        submit_reviewer_app_approve(number, head, app_token, reviewer)
+        print(f"{MODE}: App APPROVE (deterministic: gates green, default route `{reviewer}`)")
+        return True
+    if deterministic and not app_token:
+        print(
+            f"{MODE}: deterministic auto-approve eligible but REVIEWER_APP_TOKEN unset; "
+            "skipping App approval (configure REVIEWER_APP_PRIVATE_KEY when ready)"
+        )
+    verdict_reviewer, verdict_author = find_trusted_verdict(
+        number, head, reviewer, excluded_logins, cfg)
     if verdict_reviewer and app_token:
         submit_reviewer_app_approve(number, head, app_token, verdict_reviewer)
         print(
@@ -520,19 +633,26 @@ def try_reviewer_automation(number, head, paths, cfg):
     if verdict_reviewer and not app_token:
         print(
             f"{MODE}: trusted PASS verdict present but REVIEWER_APP_TOKEN unset; "
-            "skipping App approval (Cris: add reviewer App key)"
+            "skipping App approval (configure REVIEWER_APP_PRIVATE_KEY when ready)"
         )
     post_issue_comment(
         number,
         f"<!-- fb-routing: needs-review reviewer={reviewer} -->\n"
-        f"Agent reviewer route: `{reviewer}`. Post PASS verdict "
-        f"`<!-- fb-verdict: PASS reviewer=<bot> sha={head} -->` from a trusted identity, "
-        "or address gate findings.",
+        f"Agent reviewer route: `{reviewer}`. "
+        + (
+            "Verdict-based App approval is disabled (`verdict_approval_enabled: false`). "
+            if not cfg.get("verdict_approval_enabled")
+            else f"Post PASS verdict `<!-- fb-verdict: PASS reviewer={reviewer} sha={head} -->` "
+                 "from a trusted non-participant identity, "
+        )
+        + "or address gate findings.",
     )
     return False
 
 
 def main():
+    if not (MODE or "").strip():
+        fail("MODE is unset; workflow must set MODE")
     if MODE not in ("agent-denied-paths", "agent-review-of-record"):
         fail(f"unknown MODE {MODE!r}")
     if not TOKEN.strip():
@@ -696,8 +816,11 @@ def main():
             fail(f"PR changes {changed_n} files (> {MAX_FILES}); cannot list them all")
         files = paginate(f"/repos/{REPO}/pulls/{number}/files", MAX_FILES)
         paths = {f["filename"] for f in files}
-        cfg = policy_canon_json(REVIEWERS_JSON)
-        if try_reviewer_automation(number, head, paths, cfg):
+        cfg = load_reviewers_config()
+        excluded_logins = set(excluded)
+        if author:
+            excluded_logins.add(author)
+        if try_reviewer_automation(number, head, paths, cfg, excluded_logins):
             reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
             latest = {}
             for r in reviews:
@@ -714,5 +837,5 @@ def main():
     print(f"{MODE}: approved at {head[:12]} by {ok}")
 
 
-if os.environ.get("MODE"):
+if "MODE" in os.environ:
     main()
