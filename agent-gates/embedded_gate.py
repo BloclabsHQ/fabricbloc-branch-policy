@@ -65,6 +65,9 @@ HUMAN_BRANCH_TYPES = (
 # Dedicated reviewer GitHub App (fabricbloc-reviewer). Login + numeric user id must both match.
 # Re-pin org ruleset SHA after any change. App counts only via target repo ai_reviewers (F6-D10).
 REVIEWER_APP_BOTS = {("fabricbloc-reviewer[bot]", 337673700)}
+# fabricbloc-verdict posts PR comment markers only; never review-of-record APPROVE.
+VERDICT_APP_BOT_LOGIN = "fabricbloc-verdict[bot]"
+VERDICT_APP_BOT_ID = 337980250
 APPROVAL_REF_RE = re.compile(
     r"approval-ref:\s*(slack:\d+\.\d+|cli:[A-Za-z0-9._-]{6,64})")
 VERDICT_RE = re.compile(
@@ -452,6 +455,8 @@ def approval_qualifies(review, head, allow, excluded, reviewer_bots):
     if review.get("commit_id") != head:
         return False
     if login not in allow or login in excluded:
+        return False
+    if login.lower() == VERDICT_APP_BOT_LOGIN.lower() or uid == VERDICT_APP_BOT_ID:
         return False
     if not is_agent(login=login):
         return True

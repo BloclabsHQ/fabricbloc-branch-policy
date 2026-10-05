@@ -12,7 +12,7 @@ Agent PRs are authored by **`cursoragent`** (and related agent identities). Any 
 
 Create **`fabricbloc-verdict`** (separate from **fabricbloc-reviewer**):
 
-- The verdict App posts issue comments containing `<!-- fabricbloc-verdict v1 reviewer=<slug> verdict=PASS|FAIL head=<head> -->` from its bot login only.
+- The verdict App posts issue comments containing `<!-- fabricbloc-verdict v1 reviewer=<slug> verdict=PASS|FAIL head=<head> -->` from its bot login only. Repository permissions: **Issues: Read & write**, **Pull requests: Read & write** (PR comments require PR write; Issues-only write is not enough), **Metadata: Read-only**; no Contents, Checks, or Administration. PR write is for comments only — **APPROVE** reviews at head remain **fabricbloc-reviewer[bot]** only; **fabricbloc-verdict[bot]** APPROVE never qualifies review-of-record.
 - Store the verdict App **private key only** in reviewer bot secrets (MadAgentPM, Sentinel, Aether, Warden) — **not** author bots, **not** Actions for verdict posting.
 - Pin **`verdict_app`** `{ login, user_id }` in `rulesets/reviewers.json` (never author/committer logins).
 - Keep **fabricbloc-reviewer** in Actions with minimal repo scope; it only submits the GitHub **APPROVE** after the gate validates a verdict (when enabled) or deterministic auto-approve.

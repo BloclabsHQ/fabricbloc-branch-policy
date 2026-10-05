@@ -8,11 +8,13 @@ Do this while Warden builds the branch-policy PR. Nothing goes live until the PR
 3. Homepage URL: `https://github.com/BloclabsHQ/fabricbloc-branch-policy`
 4. Webhook: uncheck Active (no webhook needed).
 5. Permissions:
-   - Repository → Issues: **Read & write** (for PR comments; GitHub uses the Issues API for PR comments)
-   - Repository → Pull requests: **Read-only**
+   - Repository → Issues: **Read & write**
+   - Repository → Pull requests: **Read & write** (required to create comments on pull requests; GitHub returns **403** if the App only has Issues write + Pull requests read)
    - Repository → Metadata: **Read-only**
    - Everything else: **No access**
    - Especially: Contents = No access, Checks = No access, Administration = No access
+
+   **Pull request write is for PR comments only** (same marker body as today). The gate never treats an **APPROVE** review from **fabricbloc-verdict[bot]** as satisfying review-of-record; only unedited `<!-- fabricbloc-verdict v1 … -->` issue comments count. GitHub **APPROVE** at head stays with **fabricbloc-reviewer[bot]**.
 6. Where can this App be installed? Only on this account (BloclabsHQ).
 7. Create the App. Note the **App ID** and the **Client ID**.
 
@@ -57,5 +59,6 @@ The gate accepts verdict comments only when the comment author matches **`login`
 
 ## 6. Do not
 - Do not give author bots (or every bot) the PEM.
-- Do not grant Contents or Pull request write (approval) to this App. Approvals stay with fabricbloc-reviewer.
+- Do not grant **Contents**, **Checks**, or **Administration** to this App.
+- Do not expect **fabricbloc-verdict** GitHub **APPROVE** reviews to satisfy **agent-review-of-record** (the gate rejects them; use comment markers + **fabricbloc-reviewer** for APPROVE).
 - Do not apply the org ruleset yourself until MadAgentPM asks with the final pin SHA.
