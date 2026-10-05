@@ -19,7 +19,9 @@
     "agent_gates_sha": "1ddbd5bc04e4d7afa69be602aceede299774624d",
     "branch_name_guard_sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25",
     "hygiene_sha": "1ddbd5bc04e4d7afa69be602aceede299774624d",
-    "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit."
+    "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit.",
+    "legacy_branch_pr_created_before": "2026-10-19T00:00:00Z",
+    "_legacy_branch_note": "PRs with created_at before this instant may use agent/(session|autonomous)/... after dual-accept ends. Set org/repo var LEGACY_BRANCH_PR_CREATED_BEFORE to match. Ineffective until all branch producers emit agent/<bot>/... (cannot fire early)."
   },
   "organization_rulesets": [
     {
