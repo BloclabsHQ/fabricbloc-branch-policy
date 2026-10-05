@@ -37,11 +37,8 @@ DENIED = list(FLOOR_DENIED)
 CURSOR_ID = 199161495
 CRIS_ID = 42707764
 VERDICT_BOT = "fabricbloc-verdict[bot]"
-VERDICT_BOT_ID = 900001
-CFG_VERDICT = {
-    **CFG,
-    "verdict_app": {"login": VERDICT_BOT, "user_id": VERDICT_BOT_ID},
-}
+VERDICT_BOT_ID = 337980250
+CFG_VERDICT = CFG
 
 
 def verdict_marker(reviewer, head, verdict="PASS"):
@@ -199,6 +196,25 @@ class TestReviewerRouting(unittest.TestCase):
         self.assertFalse(
             is_verdict_app_author({"login": "evil[bot]", "id": VERDICT_BOT_ID}, CFG_VERDICT)
         )
+        self.assertFalse(
+            is_verdict_app_author({"login": VERDICT_BOT, "id": 337980251}, CFG_VERDICT)
+        )
+
+    def test_pinned_verdict_app_id_satisfies_docs_only(self):
+        paths = {"docs/readme.md"}
+        comments = [
+            comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+        ]
+        import embedded_gate as eg
+
+        orig = eg.agent_denied_paths_successful
+        eg.agent_denied_paths_successful = lambda _h: True
+        try:
+            ok, reason = verdict_approval_satisfied(
+                comments, HEAD, paths, CFG, set(), DENIED, "agent/session/feat/x-y")
+        finally:
+            eg.agent_denied_paths_successful = orig
+        self.assertTrue(ok, reason)
 
     def test_user_id_zero_fail_closed(self):
         cfg = {**CFG_VERDICT, "verdict_app": {"login": VERDICT_BOT, "user_id": 0}}

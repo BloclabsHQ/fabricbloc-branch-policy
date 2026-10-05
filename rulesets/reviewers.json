@@ -3,8 +3,9 @@
   "verdict_approval_enabled": true,
   "verdict_app": {
     "login": "fabricbloc-verdict[bot]",
-    "user_id": 0,
-    "_note": "Warden/Cris: replace user_id with the numeric bot id after the App posts once; 0 keeps verdict auto-approve fail-closed."
+    "user_id": 337980250,
+    "app_id": 5193724,
+    "_note": "Gate matches comment author by login AND user_id together (not login alone). PEM distribution still pending from Cris."
   },
   "default_reviewer": "madagentpm",
   "deterministic_auto_approve_exclusions": [

@@ -4,7 +4,7 @@
 
 Agent PRs are authored by **`cursoragent`** (and related agent identities). Any verdict or approval path that trusts the same logins lets an agent **PASS its own PR**. Review-of-record must come from an identity that cannot be the PR author or a commit participant.
 
-**`verdict_approval_enabled`** is **`true`** in `rulesets/reviewers.json`, but **`verdict_app.user_id`** stays **`0`** until Cris creates **fabricbloc-verdict** and Warden pins the numeric bot id — until then verdict auto-approve **fails closed**. The **fabricbloc-reviewer** App still auto-approves **deterministic** docs/fixtures when allowed.
+**`verdict_approval_enabled`** is **`true`** in `rulesets/reviewers.json`. **`verdict_app`** is pinned to **fabricbloc-verdict[bot]** / **337980250** (App **5193724**); comment trust requires **both** login and numeric id. Verdict posting still needs the App PEM on reviewer bots (pending from Cris). The **fabricbloc-reviewer** App still auto-approves **deterministic** docs/fixtures when allowed.
 
 ## Options
 
@@ -31,4 +31,4 @@ Disable all App automation; require a human **User** approval at head. Simplest 
 
 **Option A** — separate **fabricbloc-verdict** App whose key never enters Actions, paired login+id in canon, **`verdict_approval_enabled`** flipped only after Cris validates end-to-end on a probe PR.
 
-Until **`verdict_app.user_id`** is non-zero, rely on routing labels plus deterministic auto-approve for low-risk paths; verdict-eligible ADRs/engine tests need Cris setup per `docs/FABRICBLOC-VERDICT-APP-SETUP.md` (or repo upload copy).
+Until reviewer bots hold the verdict App PEM, rely on routing labels plus deterministic auto-approve for low-risk paths; verdict-eligible ADRs/engine tests need PEM distribution per `docs/FABRICBLOC-VERDICT-APP-SETUP.md`.

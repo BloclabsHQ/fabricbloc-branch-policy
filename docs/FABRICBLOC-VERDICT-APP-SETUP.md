@@ -41,15 +41,19 @@ Store these as Grok Bot secrets available to **MadAgentPM, Sentinel, Aether, and
 
 Also still pending from earlier: `REVIEWER_APP_PRIVATE_KEY` (fabricbloc-reviewer App) as the Actions / bot secret MadAgentPM already asked for.
 
-## 5. Tell Warden
-Reply with:
-- App ID (number)
-- Client ID
-- Installation ID
-- Bot login that will appear on comments (usually `fabricbloc-verdict[bot]`)
-- Numeric bot user id (from `https://api.github.com/users/fabricbloc-verdict%5Bbot%5D` once the App has posted once, or from the App's "Bot user" link)
+## 5. Pinned in `rulesets/reviewers.json` (PR #57)
 
-Warden will pin the bot login + numeric id into `rulesets/reviewers.json` before the PR goes live. If the bot has never posted, create a throwaway comment on a closed PR after install so the user id exists, then delete the comment.
+| Field | Value |
+|--------|--------|
+| App ID (`app_id`) | **5193724** |
+| Client ID | **Iv23liYSaXeOyEP7j5Jv** |
+| Installation ID | **168044795** (5 repos) |
+| Bot login | **fabricbloc-verdict[bot]** |
+| Bot user id (`user_id`) | **337980250** |
+
+The gate accepts verdict comments only when the comment author matches **`login` and `user_id` together** (not login alone).
+
+**Still pending from Cris:** `FABRICBLOC_VERDICT_PRIVATE_KEY` (PEM) to reviewer bots only, plus **REVIEWER_APP_PRIVATE_KEY** for fabricbloc-reviewer in Actions.
 
 ## 6. Do not
 - Do not give author bots (or every bot) the PEM.
