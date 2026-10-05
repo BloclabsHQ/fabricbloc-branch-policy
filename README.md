@@ -23,7 +23,7 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 
 | Path | What it is |
 |---|---|
-| `rulesets/canon.json` | Format v2. Declares every ruleset: 2 **org** rulesets (`canon-agent-gates`, optional `canon-branch-name-guard-pinned`) and 8 **repo** rulesets on fabricbloc (`main-required-ci`, `canon-branch-creation-restricted`, `canon-deploy-branches-human-only`, `canon-agent-branches`, `canon-provider-branches-blocked` Q12, `canon-autonomous-branch-creation` Q16, `canon-push-protected-paths` Q14, plus `policy-main-protected` on this repo). All 10 bodies validate against GitHub's published OpenAPI schema (`agent-gates/validate_canon.py`). |
+| `rulesets/canon.json` | Format v2. Declares every ruleset: 3 **org** rulesets (`canon-agent-gates`, draft `canon-wallet-green-ci`, optional `canon-branch-name-guard-pinned`) and 8 **repo** rulesets on fabricbloc (`main-required-ci`, `canon-branch-creation-restricted`, `canon-deploy-branches-human-only`, `canon-agent-branches`, `canon-provider-branches-blocked` Q12, `canon-autonomous-branch-creation` Q16, `canon-push-protected-paths` Q14, plus `policy-main-protected` on this repo). All 10 bodies validate against GitHub's published OpenAPI schema (`agent-gates/validate_canon.py`). |
 | `rulesets/README.md` | File format and apply rules |
 | `.github/workflows/agent-denied-paths.yml` | Pinned gate. Reads the changed files via `GET /pulls/{n}/files` and the denied list from the **base** commit via the contents API. No checkout, no PR code. |
 | `.github/workflows/agent-review-of-record.yml` | Pinned gate. Requires an independent, allowlisted APPROVE at the exact live head. API only. |

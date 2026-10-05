@@ -1,0 +1,363 @@
+# Cost class: event (caller-defined)
+name: hygiene-deploy-green-gate
+
+on:
+  workflow_call:
+    inputs:
+      commit_sha:
+        description: Commit SHA being deployed (typically github.sha on push)
+        type: string
+        required: true
+      required_checks:
+        description: JSON array of required check run names on the merged PR head
+        type: string
+        default: '["Lint","Security Scan","Test"]'
+
+permissions: {}
+
+jobs:
+  verify-pr-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Fail closed if PR head checks are not green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          REQUIRED_CHECKS: ${{ inputs.required_checks }}
+        run: |
+          python3 - <<'PY'
+          """Shared constants and GitHub API helpers for repo-hygiene scripts (stdlib only)."""
+          import fnmatch
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
+          DEFAULT_BASE_REF = "main"
+          MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
+
+          FLOOR_DENIED = [
+              "agents/runtime/engine/",
+              "agents/agents.yaml",
+              ".github/workflows/",
+              ".github/actions/",
+              "decisions/",
+              "architecture/decisions/",
+              "CODEOWNERS",
+              ".github/CODEOWNERS",
+              "docs/CODEOWNERS",
+          ]
+
+          HYGIENE_EXTRA_PROTECTED = [
+              "infra/",
+              "ops/",
+              "iac/",
+              "**/iam/**",
+              "**/*.tf",
+              "architecture/SECRETS.md",
+              "architecture/ENV_FILES.md",
+              "policy/",
+              "rulesets/",
+          ]
+
+          FLOOR_NEVER_ALLOWLIST = frozenset({
+              "BloclabsHQ/fabric-iac",
+              "BloclabsHQ/fabric-tss",
+              "BloclabsHQ/fabric-contracts",
+              "BloclabsHQ/fabric-auth",
+              "BloclabsHQ/fabric-wallet",
+              "BloclabsHQ/go-foundation",
+              "BloclabsHQ/fabric-platform",
+              "BloclabsHQ/github-actions",
+              "BloclabsHQ/fabricbloc-branch-policy",
+              "BloclabsHQ/context",
+          })
+
+          HOLD_LABELS = frozenset({"HOLD", "DO NOT MERGE"})
+          SPEC_LABELS = frozenset({"spec:draft", "spec:gate", "spec:ready", "blocked", "security"})
+
+          TARGET_REPOS = {"BloclabsHQ/fabricbloc"}
+
+          MAX_PAGES = 100
+
+          API = os.environ.get("API", "https://api.github.com").rstrip("/")
+          TOKEN = os.environ.get("GH_TOKEN", "")
+
+
+          def fail(mode, msg):
+              print(f"::error::{mode}: {msg}")
+              sys.exit(1)
+
+
+          def call(path, *, token=None, accept="application/vnd.github+json", allow_404=False, method="GET", body=None):
+              tok = token if token is not None else TOKEN
+              data = None
+              headers = {
+                  "Authorization": f"Bearer {tok}",
+                  "Accept": accept,
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "fabricbloc-hygiene",
+              }
+              if body is not None:
+                  data = json.dumps(body).encode()
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(API + path, data=data, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as resp:
+                      raw = resp.read().decode()
+              except urllib.error.HTTPError as exc:
+                  if allow_404 and exc.code == 404:
+                      return None
+                  raise HygieneAPIError(exc.code, path.split("?")[0])
+              except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                  raise HygieneAPIError(0, f"{type(exc).__name__}") from exc
+              if accept.endswith(".raw") or accept.endswith("+raw"):
+                  return raw
+              return json.loads(raw or "null")
+
+
+          class HygieneAPIError(Exception):
+              def __init__(self, code, path):
+                  self.code = code
+                  self.path = path
+                  super().__init__(f"GitHub API {code} on {path}")
+
+
+          def paginate(path, *, cap=MAX_PAGES, token=None):
+              out, page = [], 1
+              while page <= cap:
+                  sep = "&" if "?" in path else "?"
+                  chunk = call(f"{path}{sep}page={page}&per_page=100", token=token)
+                  if not chunk:
+                      break
+                  if not isinstance(chunk, list):
+                      break
+                  out.extend(chunk)
+                  if len(chunk) < 100:
+                      break
+                  page += 1
+              if page > cap:
+                  raise HygieneAPIError(0, f"pagination cap {cap} on {path.split('?')[0]}")
+              return out
+
+
+          def repo_short(full_name):
+              return full_name.split("/", 1)[-1]
+
+
+          def path_matches_any(path, patterns):
+              path = path or ""
+              for pat in patterns:
+                  if fnmatch.fnmatch(path, pat) or path.startswith(pat.rstrip("*")):
+                      return True
+                  if pat.endswith("/") and path.startswith(pat):
+                      return True
+              return False
+
+
+          def fetch_manifest_denied(repo, ref, *, mode="hygiene-manifest"):
+              """Load denied paths from base manifest. Any failure fails closed (never skip)."""
+              qpath = urllib.parse.quote(MANIFEST, safe="")
+              qref = urllib.parse.quote(ref, safe="")
+              path = f"/repos/{repo}/contents/{qpath}?ref={qref}"
+              try:
+                  raw = call(path, accept="application/vnd.github.raw")
+              except HygieneAPIError as exc:
+                  fail(mode, f"manifest unreadable at {ref}: {exc}")
+              if not isinstance(raw, str) or not raw.strip():
+                  fail(mode, f"manifest missing or empty at {ref}")
+              try:
+                  data = json.loads(raw)
+              except json.JSONDecodeError:
+                  fail(mode, f"manifest invalid JSON at {ref}")
+              if not isinstance(data, dict):
+                  fail(mode, f"manifest must be a JSON object at {ref}")
+              dp = data.get("denied_paths") or {}
+              if not isinstance(dp, dict):
+                  fail(mode, "manifest denied_paths must be an object")
+              denied = list(FLOOR_DENIED)
+              denied += list(dp.get("arch_0048_baseline") or [])
+              denied += list(dp.get("proposed_additions") or [])
+              denied += list(HYGIENE_EXTRA_PROTECTED)
+              never = set(FLOOR_NEVER_ALLOWLIST)
+              for name in data.get("never_allowlist") or []:
+                  if isinstance(name, str):
+                      never.add(name if "/" in name else f"BloclabsHQ/{name}")
+              return denied, never
+
+
+          def dry_run(mode_env=None):
+              mode = (mode_env or os.environ.get("HYGIENE_MODE") or "dry-run").strip().lower()
+              return mode == "dry-run"
+
+
+          def hygiene_enabled(c_var, org_var=None):
+              org = (org_var or os.environ.get("HYGIENE_ENABLED") or "").strip().lower()
+              if org == "false":
+                  return False
+              mode = (c_var or os.environ.get("HYGIENE_MODE") or "").strip().lower()
+              return mode != "off"
+
+
+          MARKER_BOT_RE = re.compile(r"<!--\s*hygiene:([\w-]+):([^>]+)\s*-->")
+
+
+          def slack_post_message(token, channel, text, thread_ts=None):
+              payload = {"channel": channel, "text": text, "unfurl_links": False, "unfurl_media": False}
+              if thread_ts:
+                  payload["thread_ts"] = thread_ts
+              data = json.dumps(payload).encode()
+              req = urllib.request.Request(
+                  "https://slack.com/api/chat.postMessage",
+                  data=data,
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  body = json.loads(resp.read().decode())
+              if not body.get("ok"):
+                  raise RuntimeError(body.get("error") or "slack error")
+              return body.get("ts")
+
+          #!/usr/bin/env python3
+          """Verify merged-PR head check runs before a deploy proceeds (fail closed)."""
+          import json
+          import os
+
+
+          MODE = "hygiene-c7-deploy-green-gate"
+          DEFAULT_CHECKS = ("Lint", "Security Scan", "Test")
+
+
+          def env(name, default=""):
+              return os.environ.get(name, default)
+
+
+          def parse_checks(raw):
+              try:
+                  parsed = json.loads(raw or "[]")
+              except json.JSONDecodeError:
+                  fail(MODE, "REQUIRED_CHECKS must be a JSON array of check names")
+              if not isinstance(parsed, list) or not parsed:
+                  fail(MODE, "REQUIRED_CHECKS must be a non-empty JSON array")
+              out = []
+              for item in parsed:
+                  if not isinstance(item, str) or not item.strip():
+                      fail(MODE, "each REQUIRED_CHECKS entry must be a non-empty string")
+                  out.append(item.strip())
+              return out
+
+
+          def check_run_ok(run):
+              conclusion = run.get("conclusion")
+              if conclusion in ("success", "skipped"):
+                  return True
+              return False
+
+
+          def latest_runs_by_name(runs):
+              by_name = {}
+              for run in runs:
+                  name = (run.get("name") or "").strip()
+                  if not name:
+                      continue
+                  prev = by_name.get(name)
+                  if prev is None or (run.get("id") or 0) > (prev.get("id") or 0):
+                      by_name[name] = run
+              return by_name
+
+
+          def fetch_check_runs(token, repo, ref):
+              path = f"/repos/{repo}/commits/{ref}/check-runs"
+              runs = []
+              page = 1
+              while page <= 10:
+                  data = call(f"{path}?per_page=100&page={page}", token=token)
+                  chunk = (data or {}).get("check_runs") or []
+                  runs.extend(chunk)
+                  if len(chunk) < 100:
+                      break
+                  page += 1
+              return runs
+
+
+          def merged_prs_for_commit(token, repo, sha):
+              pulls = call(f"/repos/{repo}/commits/{sha}/pulls", token=token)
+              if not pulls:
+                  return []
+              return [p for p in pulls if p.get("merged_at")]
+
+
+          def pick_merged_pr(prs):
+              return sorted(prs, key=lambda p: p.get("merged_at") or "", reverse=True)[0]
+
+
+          def verify_pr_head_checks(token, repo, commit_sha, required_names):
+              prs = merged_prs_for_commit(token, repo, commit_sha)
+              if not prs:
+                  fail(MODE, f"no merged pull request associated with commit {commit_sha[:7]}")
+              pr = pick_merged_pr(prs)
+              head_sha = (pr.get("head") or {}).get("sha") or ""
+              if not head_sha:
+                  fail(MODE, f"merged PR #{pr.get('number')} missing head.sha")
+              by_name = latest_runs_by_name(fetch_check_runs(token, repo, head_sha))
+              missing = []
+              bad = []
+              for req in required_names:
+                  run = by_name.get(req)
+                  if run is None:
+                      missing.append(req)
+                      continue
+                  if not check_run_ok(run):
+                      bad.append(f"{req}={run.get('conclusion')}")
+              if missing:
+                  fail(
+                      MODE,
+                      f"PR #{pr.get('number')} head {head_sha[:7]} missing checks: {', '.join(missing)}",
+                  )
+              if bad:
+                  fail(
+                      MODE,
+                      f"PR #{pr.get('number')} head {head_sha[:7]} failed checks: {', '.join(bad)}",
+                  )
+              return {
+                  "commit_sha": commit_sha,
+                  "pr_number": pr.get("number"),
+                  "head_sha": head_sha,
+                  "checks": required_names,
+              }
+
+
+          def main():
+              token = env("GH_TOKEN")
+              repo = env("REPO")
+              commit_sha = env("COMMIT_SHA")
+              if not token:
+                  fail(MODE, "GH_TOKEN missing")
+              if not repo:
+                  fail(MODE, "REPO missing")
+              if not commit_sha or len(commit_sha) != 40:
+                  fail(MODE, "COMMIT_SHA must be a 40-char commit SHA")
+              raw_checks = env("REQUIRED_CHECKS")
+              required = parse_checks(raw_checks) if raw_checks else list(DEFAULT_CHECKS)
+              try:
+                  result = verify_pr_head_checks(token, repo, commit_sha, required)
+              except HygieneAPIError as exc:
+                  fail(MODE, str(exc))
+              print(json.dumps(result))
+
+
+          if __name__ == "__main__":
+              main()
+          PY

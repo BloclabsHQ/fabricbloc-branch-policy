@@ -89,6 +89,73 @@
       ]
     },
     {
+      "name": "canon-wallet-green-ci",
+      "_finding": "Warden: fabric-wallet merged to dev/main while CI red or pending (#1433, #1435). Founder yes WALLET-GREEN-CI recorded 2026-10-05 01:01 PT (Cris via MadGeniusBot); apply after policy PR #47 merges.",
+      "_apply_after": "README: merge fabricbloc-branch-policy PR #47; org-owner applies this ruleset (MadGeniusBot)",
+      "_comment": "Org ruleset scoped by repository_name.include (add repo short names to extend). Job-level skips in ci.yml report success when docs-only; do not add Detect changes as required.",
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "repository_name": {
+          "include": [
+            "fabric-wallet"
+          ],
+          "exclude": [],
+          "protected": true
+        },
+        "ref_name": {
+          "include": [
+            "refs/heads/dev",
+            "refs/heads/main"
+          ],
+          "exclude": []
+        }
+      },
+      "bypass_actors": [],
+      "rules": [
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 0,
+            "dismiss_stale_reviews_on_push": false,
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": false,
+            "allowed_merge_methods": [
+              "merge",
+              "squash",
+              "rebase"
+            ]
+          }
+        },
+        {
+          "type": "required_status_checks",
+          "parameters": {
+            "strict_required_status_checks_policy": true,
+            "do_not_enforce_on_create": false,
+            "required_status_checks": [
+              {
+                "context": "Lint",
+                "integration_id": 15368
+              },
+              {
+                "context": "Security Scan",
+                "integration_id": 15368
+              },
+              {
+                "context": "Test",
+                "integration_id": 15368
+              },
+              {
+                "context": "Migration Checksum",
+                "integration_id": 15368
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "canon-branch-name-guard-pinned",
       "_founder_decision": "F6-D6",
       "_comment": "Optional: the same F6 fix for GOV-0022 'guard / guard', which today runs through fabricbloc's own (PR-editable) thin caller pinned to a0139c0. After apply, drop 'guard / guard' from main-required-ci.",

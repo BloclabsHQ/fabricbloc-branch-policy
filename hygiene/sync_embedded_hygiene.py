@@ -15,6 +15,7 @@ WORKFLOWS = {
     "hygiene-ci-red": "ci_red",
     "hygiene-branch-prune": "branch_prune",
     "hygiene-backlog-lint": "backlog_lint",
+    "hygiene-deploy-green-gate": "deploy_green_gate",
 }
 
 
