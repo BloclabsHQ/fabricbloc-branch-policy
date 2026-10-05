@@ -5,7 +5,7 @@ One row per enforced rule. Consumers pin this repo at a release SHA and cite IDs
 | ID | Domain | Rule (one line) | Enforcer | Test |
 |---|---|---|---|---|
 | BR-01 | 01-branch-rules | Branch names follow GOV-0022 ADR (human, legacy session/autonomous, provider blocks) | `branch-name-guard.yml` + `scripts/branch-name-policy.py` | scripts/test_branch_name_policy.py |
-| BR-04 | 01-branch-rules | Bot branches use `agent/<bot>/<type>/<scope>-<slug>` with `bots.json` allowlist | `branch-name-guard.yml` + `rulesets/bots.json` | scripts/test_branch_name_policy.py |
+| BR-04 | 01-branch-rules | Bot branches use `agent/<bot>/<type>/<scope>-<slug>` with `bots.json` allowlist; legacy session/autonomous dual-accept until `legacy_branch_pr_created_before` (2026-10-19) | `branch-name-guard.yml` + `rulesets/bots.json` | scripts/test_branch_name_policy.py |
 | CU-01 | 04-cursor | One agent per PR: `find_by_pr` then `reply`; never relaunch on existing agent | Harness / session registry | domains/04-cursor/tests/test_cloud_sessions.py |
 | CU-02 | 04-cursor | Branch names match `session_branch_regex` / `bot_branch_regex` (BR-01) | Harness launch + BR guard | domains/04-cursor/tests/test_cloud_sessions.py |
 | CU-03 | 04-cursor | Caps: 4 running, 2 per bot, 2 per repo, 6 launches/h | Harness registry | domains/04-cursor/tests/test_cloud_sessions.py |

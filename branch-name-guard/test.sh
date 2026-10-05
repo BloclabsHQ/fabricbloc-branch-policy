@@ -36,11 +36,13 @@ accepted=(
   "agent/session/docs/658-branch-identity-patterns"
   "agent/autonomous/ci/fleet-branch-guard"
   "agent/warden/feat/warden-my-feature"
+  "agent/aether/docs/atlas-http-events-spec"
 )
 
 rejected=(
   "agent/atlas/docs/658-branch-identity-patterns"
   "agent/codex/docs/658-branch-identity-patterns"
+  "agent/cursor/docs/test-my-branch"
   "agent/session/docs/identity"
   "codex/docs/branch-identity"
   "claude/fix/branch-identity"
