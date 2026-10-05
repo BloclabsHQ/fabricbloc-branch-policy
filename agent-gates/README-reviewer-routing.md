@@ -9,7 +9,7 @@ Canon: `rulesets/reviewers.json` loaded from `fabricbloc-branch-policy` at **`pi
 **fabricbloc-reviewer** (App **5185203**, bot **337673700**) may submit APPROVE only when:
 
 - `agent-denied-paths` is **success** on the head commit,
-- **every** changed path (new **and** `previous_filename` on renames) passes **deny → route → allow** (case-insensitive): not on **`deterministic_auto_approve_exclusions`**, not matching any **reviewer route**, not on **agent-denied-paths** floor/manifest, and on the small **`deterministic_auto_approve_allowlist`** (`docs/**`, `**/fixtures/**`, `**/testdata/**` only),
+- **every** changed path (new **and** `previous_filename` on renames) passes **deny → route → allow** (case-insensitive): not on **`deterministic_auto_approve_exclusions`**, not matching any **reviewer route**, not on **agent-denied-paths** floor/manifest, and allowed by **pinned extension policy** in `embedded_gate.py` (doc/data extensions under `docs/`, `**/fixtures/**`, or `**/testdata/**` only; no `.svg`/`.html`/`.htm`),
 - no **cris_required** route on the PR set, and
 - `REVIEWER_APP_TOKEN` is minted (requires org/repo **`REVIEWER_APP_CLIENT_ID`** var + **`REVIEWER_APP_PRIVATE_KEY`** secret). If the key is missing, the workflow **skips** token mint with a notice (no fail solely for missing key).
 
