@@ -9,7 +9,7 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
 1. Config: **`rulesets/gate-owners.json`** at **`pins.agent_gates_sha`** (never the PR head).  
    - **`gate_owners`**: `{ login, user_id }` pairs (both required).  
    - **`owner_approved_label`**: default **`owner-approved`**.  
-   - **`allowed_label_apps`**: App ids and/or slugs allowed when GitHub sets **`performed_via_github_app`** on the label event (default **`[]`** — only human PAT/web UI labels until org adds Apps after live test-label).
+   - **`allowed_label_apps`**: App ids and/or slugs allowed when GitHub sets **`performed_via_github_app`** on the label event. Seeded **`1210556`** (Cursor GitHub App; MadAgentPM probe on **`owner-approved`**). Human PAT/web UI labels with no App metadata still pass when the allowlist is non-empty.
 
 2. **Cris** (or another configured owner) applies **`owner-approved`** on the PR after reviewing the **current head**.
 

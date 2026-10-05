@@ -1,5 +1,5 @@
 {
-  "_comment": "Recorded owner override for agent gates (AG-06). Loaded from fabricbloc-branch-policy at pins.agent_gates_sha — never the PR head.",
+  "_comment": "Recorded owner override for agent gates (AG-06). Loaded from fabricbloc-branch-policy at pins.agent_gates_sha — never the PR head. allowed_label_apps 1210556 = Cursor GitHub App (MadAgentPM probe: owner-approved labeled with performed_via_github_app id 1210556 slug cursor).",
   "owner_approved_label": "owner-approved",
   "gate_owners": [
     {
@@ -7,5 +7,5 @@
       "user_id": 42707764
     }
   ],
-  "allowed_label_apps": []
+  "allowed_label_apps": [1210556]
 }

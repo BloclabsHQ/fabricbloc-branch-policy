@@ -641,12 +641,15 @@ class T(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("allowed_label_apps", out)
 
+    def test_gate_owners_json_seeds_cursor_github_app_id(self):
+        cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
+        self.assertIn(1210556, cfg.get("allowed_label_apps") or [])
+
     def test_owner_approval_allowed_github_app_passes(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         pin = "cafebabecafebabecafebabecafebabecafebabe"
         canon.setdefault("pins", {})["agent_gates_sha"] = pin
         owners_cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
-        owners_cfg["allowed_label_apps"] = [1210556]
         setup(
             files=(".github/workflows/ci.yml",),
             issue_labels=("owner-approved",),
