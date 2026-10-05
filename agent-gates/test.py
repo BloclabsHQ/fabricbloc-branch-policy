@@ -869,6 +869,15 @@ class T(unittest.TestCase):
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         self.assertEqual(gates.get("bypass_actors"), [])
 
+    def test_canon_agent_gates_pull_request_review_count(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        pr_rules = [r for r in gates.get("rules") or [] if r.get("type") == "pull_request"]
+        self.assertEqual(len(pr_rules), 1, pr_rules)
+        params = pr_rules[0]["parameters"]
+        self.assertEqual(params.get("required_approving_review_count"), 1)
+        self.assertNotIn("allowed_merge_methods", params)
+
     def test_canon_agent_gates_live_ref_include(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")

@@ -12,6 +12,17 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = Path(__file__).resolve().parent / "cloud-sessions.yaml"
 SCHEMA = ROOT / "schemas" / "cloud-sessions.schema.json"
+BOTS_JSON = ROOT / "rulesets" / "bots.json"
+
+
+def load_branch_name_policy():
+    import importlib.util
+
+    path = ROOT / "scripts" / "branch-name-policy.py"
+    spec = importlib.util.spec_from_file_location("branch_name_policy", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def load_policy() -> dict:
@@ -38,6 +49,18 @@ def semantic_checks(data: dict) -> list[str]:
     waits = data.get("waits") or {}
     if int(waits.get("max_in_agent_wait_seconds") or 0) > 120:
         errs.append("max_in_agent_wait_seconds must be <= 120 (Loom memo)")
+    branch_name = (data.get("launch") or {}).get("branch_name") or {}
+    try:
+        bnp = load_branch_name_policy()
+        bots = bnp.load_bot_slugs(BOTS_JSON)
+        expected_bot = bnp.bot_branch_regex_from_bots(bots)
+        expected_agent = bnp.agent_re_combined(bots)
+        if branch_name.get("bot_branch_regex") != expected_bot:
+            errs.append("bot_branch_regex must match rulesets/bots.json (run branch-name sync / update yaml)")
+        if branch_name.get("agent_re") != expected_agent:
+            errs.append("agent_re must match rulesets/bots.json (run branch-name sync / update yaml)")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        errs.append(f"bots.json / branch-name-policy: {exc}")
     return errs
 
 
