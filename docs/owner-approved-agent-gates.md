@@ -14,11 +14,23 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
 
 3. Both pinned gates re-run on **`labeled`** / **`unlabeled`** (and existing PR events). They pass when:
    - the label is **present** on the PR;
-   - the **newest** timeline event for that label is **`labeled`** (not **`unlabeled`**);
-   - the **`labeled`** event **actor** matches a **`gate_owners`** entry (login + user id);
-   - the label event **`created_at`** is **≥** the current **head commit** committer timestamp (new push invalidates until re-label).
+   - the **newest** timeline event for that label is **`labeled`** (not **`unlabeled`**) and the label name matches **`owner_approved_label`** only;
+   - the **`labeled`** event **actor** is a **`User`** matching a **`gate_owners`** entry (login + user id; not `*[bot]`, not `performed_via_github_app`);
+   - **Staleness (server push time):** `labeled_at` is **strictly after** the time the current head SHA was pushed to **`head_ref`**:
+     1. `GET /repos/{repo}/activity?ref=refs/heads/{head_ref}` — newest entry whose **`after`** equals head SHA;
+     2. if none: earliest **`check-suite`** `created_at` on that head SHA;
+     3. if still none: owner override **not satisfied** (fail closed).  
+     Commit author/committer dates are **not** used (forgable / backdatable).
 
-4. **Scope:** Clears **Cris-only** **`agent-denied-paths`** failures and satisfies **`agent-review-of-record`** without a GitHub **APPROVE**. Does **not** override provider-control / projection hard-fails, open **CHANGES_REQUESTED**, or Sentinel security domains — intentional owner override, not a silent weaken.
+4. **Scope:** Clears **Cris-only** **`agent-denied-paths`** failures and satisfies **`agent-review-of-record`** without a GitHub **APPROVE**. **DECISIONS #16** explicitly **carves out** decision **#14** for this path: **`madgeniusblink`** label approval counts for ROR **including madgeniusblink-authored PRs** (Cris may apply the label via agent tooling with Cris token). Does **not** override provider-control / projection hard-fails, open **CHANGES_REQUESTED**, or Sentinel security domains.
+
+5. **Logging:** when GitHub includes **`performed_via_github_app`** on the label event, the gate logs it (success path if ever present on a qualifying event; rejection path when App-mediated).
+
+6. **Missing config:** if **`gate-owners.json`** is absent at the pin, owner override is **not satisfied** (gates keep failing; not a workflow hard-fail).
+
+### ESC / edge cases
+
+- **Fork PRs** or repos where **activity** and **check-suite** data for the head SHA are unavailable: owner override cannot clear gates until push time is observable (re-label after checks exist, or merge from a human branch).
 
 ## Operator steps (fabricbloc example)
 
@@ -26,7 +38,7 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
 2. Review the diff at the current head SHA.  
 3. Add label **`owner-approved`**.  
 4. Wait for **`agent-denied-paths`** and **`agent-review-of-record`** to re-run green.  
-5. After any new push, repeat from step 2 (label must be re-applied after the new head exists).
+5. After any new push, repeat from step 2 (re-apply **`owner-approved`** only **after** the push so label time is strictly after server push time).
 
 ## Re-pin after merge (GATE: Cris)
 
@@ -83,4 +95,4 @@ Keep **workflows**, **engine**, **`.cursor`**, **CODEOWNERS**, and **`.gitmodule
 
 ## Decision
 
-Recorded as **DECISIONS.md** entry **15** (Warden / council-delegated policy).
+Recorded as **DECISIONS.md** entry **16** (Warden; **#15** reserved for FC-01 / PR #73).

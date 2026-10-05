@@ -52,6 +52,7 @@ jobs:
           # commit. Python stdlib only. Any API error or ambiguity fails closed.
           import fnmatch
           import json, os, re, sys, urllib.error, urllib.parse, urllib.request
+          from datetime import datetime, timezone
           SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
           TARGET_REPOS = {
               "BloclabsHQ/fabricbloc",
@@ -570,7 +571,104 @@ jobs:
           def load_gate_owners_config():
               """Never read gate-owners.json from the PR head; use pinned policy SHA or main."""
               ref = policy_reviewers_ref()
-              return policy_repo_file(GATE_OWNERS_JSON, ref)
+              q = urllib.parse.quote(GATE_OWNERS_JSON)
+              raw = call(
+                  f"/repos/{SELF_REPO}/contents/{q}?ref={ref}",
+                  accept="application/vnd.github.raw",
+                  allow_404=True,
+              )
+              if raw is None:
+                  return None
+              try:
+                  return json.loads(raw)
+              except ValueError:
+                  fail(f"{GATE_OWNERS_JSON} on {SELF_REPO}@{ref[:12]} is not valid JSON")
+
+
+          def parse_rfc3339(value, label):
+              if not value or not isinstance(value, str):
+                  fail(f"{label}: missing timestamp")
+              s = value.strip()
+              if s.endswith("Z"):
+                  s = s[:-1] + "+00:00"
+              try:
+                  dt = datetime.fromisoformat(s)
+              except ValueError:
+                  fail(f"{label}: invalid ISO-8601 timestamp {value!r}")
+              if dt.tzinfo is None:
+                  dt = dt.replace(tzinfo=timezone.utc)
+              return dt
+
+
+          def activity_entry_after_sha(entry, head_sha):
+              sha = head_sha.lower()
+              candidates = []
+              for key in ("after", "head"):
+                  val = entry.get(key)
+                  if isinstance(val, str):
+                      candidates.append(val.lower())
+              payload = entry.get("payload") or {}
+              for key in ("after", "head"):
+                  val = payload.get(key)
+                  if isinstance(val, str):
+                      candidates.append(val.lower())
+              return sha in candidates
+
+
+          def activity_entry_timestamp(entry):
+              for key in ("created_at", "timestamp", "pushed_at"):
+                  val = entry.get(key)
+                  if isinstance(val, str) and val.strip():
+                      return val.strip()
+              return None
+
+
+          def head_push_time_from_activity(repo, head_ref, head_sha):
+              ref_param = f"refs/heads/{head_ref}"
+              qref = urllib.parse.quote(ref_param, safe="")
+              page = 1
+              while True:
+                  batch = call(
+                      f"/repos/{repo}/activity?per_page=100&page={page}&ref={qref}",
+                      allow_404=True,
+                  )
+                  if batch is None:
+                      return None
+                  if not isinstance(batch, list):
+                      fail("unexpected repository activity shape")
+                  for item in batch:
+                      if activity_entry_after_sha(item, head_sha):
+                          ts = activity_entry_timestamp(item)
+                          if ts:
+                              return ts
+                  if len(batch) < 100:
+                      break
+                  page += 1
+              return None
+
+
+          def earliest_check_suite_created_at(repo, head_sha):
+              data = call(
+                  f"/repos/{repo}/commits/{head_sha}/check-suites",
+                  allow_404=True,
+              )
+              if not isinstance(data, dict):
+                  return None
+              suites = data.get("check_suites")
+              if not isinstance(suites, list) or not suites:
+                  return None
+              times = [s.get("created_at") for s in suites if s.get("created_at")]
+              return min(times) if times else None
+
+
+          def resolve_head_push_time(repo, head_ref, head_sha):
+              ts = head_push_time_from_activity(repo, head_ref, head_sha)
+              if ts:
+                  return ts, "activity"
+              ts = earliest_check_suite_created_at(repo, head_sha)
+              if ts:
+                  return ts, "check-suite"
+              return None, None
 
 
           def gate_owner_identity_matches(actor, owners):
@@ -591,6 +689,20 @@ jobs:
                   if login == elogin and uid == euid:
                       return True
               return False
+
+
+          def gate_owner_label_actor_ok(actor, labeled_event):
+              """Human gate owner only — not bot/App-mediated label events."""
+              login = ((actor or {}).get("login") or "").strip()
+              if login.lower().endswith("[bot]"):
+                  return False, f"label actor {login!r} is a bot login"
+              actor_type = ((actor or {}).get("type") or "").strip()
+              if actor_type and actor_type.lower() != "user":
+                  return False, f"label actor type {actor_type!r} is not User"
+              if labeled_event.get("performed_via_github_app"):
+                  app = labeled_event.get("performed_via_github_app")
+                  return False, f"label applied via GitHub App (performed_via_github_app={app!r})"
+              return True, None
 
 
           def paginate_issue_events(repo, number):
@@ -627,16 +739,7 @@ jobs:
               return out
 
 
-          def head_commit_committer_date(repo, head):
-              item = call(f"/repos/{repo}/commits/{head}")
-              commit = (item or {}).get("commit") or {}
-              ts = (commit.get("committer") or {}).get("date") or (commit.get("author") or {}).get("date")
-              if not ts:
-                  fail(f"commit {head[:12]} lacks committer timestamp; failing closed")
-              return ts
-
-
-          def owner_approval_valid_for_head(repo, number, head, owners_cfg):
+          def owner_approval_valid_for_head(repo, number, head, head_ref, owners_cfg):
               """Return (True, detail) when label owner-approved is audited for current head."""
               label = (owners_cfg.get("owner_approved_label") or "owner-approved").strip()
               owners = owners_cfg.get("gate_owners") or []
@@ -656,23 +759,39 @@ jobs:
               if newest.get("event") != "labeled":
                   return False, f"newest {label!r} timeline event is unlabeled"
               actor = newest.get("actor") or {}
+              ok_actor, actor_reason = gate_owner_label_actor_ok(actor, newest)
+              if not ok_actor:
+                  return False, actor_reason
               if not gate_owner_identity_matches(actor, owners):
                   login = (actor.get("login") or "?")
                   return False, f"{label!r} labeled event actor {login!r} is not a configured gate owner"
               labeled_at = newest.get("created_at") or ""
-              head_at = head_commit_committer_date(repo, head)
-              if labeled_at < head_at:
+              pushed_at, push_source = resolve_head_push_time(repo, head_ref, head)
+              if not pushed_at:
                   return False, (
-                      f"owner approval at {labeled_at} predates current head commit ({head_at}); "
-                      "re-apply label after push"
+                      "no server push time for current head "
+                      "(repository activity + check-suite fallback unavailable)"
+                  )
+              labeled_dt = parse_rfc3339(labeled_at, "labeled_at")
+              pushed_dt = parse_rfc3339(pushed_at, "pushed_at")
+              if labeled_dt <= pushed_dt:
+                  return False, (
+                      f"owner label at {labeled_at} not after head push at {pushed_at} "
+                      f"(source={push_source}); re-apply label after push"
                   )
               who = (actor.get("login") or "owner")
-              return True, f"owner-approved for head {head[:12]} by {who}"
+              via_app = newest.get("performed_via_github_app")
+              if via_app:
+                  print(f"{MODE}: owner-approved label performed_via_github_app={via_app!r}")
+              return True, f"owner-approved for head {head[:12]} by {who} (push {push_source})"
 
 
-          def owner_gate_passes(repo, number, head):
+          def owner_gate_passes(repo, number, head, head_ref):
               cfg = load_gate_owners_config()
-              ok, detail = owner_approval_valid_for_head(repo, number, head, cfg)
+              if cfg is None:
+                  print(f"{MODE}: owner override not satisfied (gate-owners.json missing at pin)")
+                  return False
+              ok, detail = owner_approval_valid_for_head(repo, number, head, head_ref, cfg)
               if ok:
                   print(f"{MODE}: {detail} (AG-06 owner override)")
                   return True
@@ -1278,7 +1397,7 @@ jobs:
                       p for p in paths if classify_agent_path_tier(p, denied) == "verdict_eligible"
                   )
                   if cris_only:
-                      if owner_gate_passes(REPO, number, head):
+                      if owner_gate_passes(REPO, number, head, head_ref):
                           for p in cris_only:
                               print(
                                   f"::notice file={p}::Cris-only path cleared by owner-approved (AG-06)"
@@ -1389,7 +1508,7 @@ jobs:
                   fail(f"open CHANGES_REQUESTED from {blocked}")
               ok = sorted(l for l, r in latest.items()
                           if approval_qualifies(r, head, allow, excluded, reviewer_bots))
-              if not ok and owner_gate_passes(REPO, number, head):
+              if not ok and owner_gate_passes(REPO, number, head, head_ref):
                   print(f"{MODE}: owner override satisfies review-of-record at {head[:12]}")
                   return
               if not ok:
@@ -1471,6 +1590,7 @@ jobs:
           # commit. Python stdlib only. Any API error or ambiguity fails closed.
           import fnmatch
           import json, os, re, sys, urllib.error, urllib.parse, urllib.request
+          from datetime import datetime, timezone
           SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
           TARGET_REPOS = {
               "BloclabsHQ/fabricbloc",
@@ -1989,7 +2109,104 @@ jobs:
           def load_gate_owners_config():
               """Never read gate-owners.json from the PR head; use pinned policy SHA or main."""
               ref = policy_reviewers_ref()
-              return policy_repo_file(GATE_OWNERS_JSON, ref)
+              q = urllib.parse.quote(GATE_OWNERS_JSON)
+              raw = call(
+                  f"/repos/{SELF_REPO}/contents/{q}?ref={ref}",
+                  accept="application/vnd.github.raw",
+                  allow_404=True,
+              )
+              if raw is None:
+                  return None
+              try:
+                  return json.loads(raw)
+              except ValueError:
+                  fail(f"{GATE_OWNERS_JSON} on {SELF_REPO}@{ref[:12]} is not valid JSON")
+
+
+          def parse_rfc3339(value, label):
+              if not value or not isinstance(value, str):
+                  fail(f"{label}: missing timestamp")
+              s = value.strip()
+              if s.endswith("Z"):
+                  s = s[:-1] + "+00:00"
+              try:
+                  dt = datetime.fromisoformat(s)
+              except ValueError:
+                  fail(f"{label}: invalid ISO-8601 timestamp {value!r}")
+              if dt.tzinfo is None:
+                  dt = dt.replace(tzinfo=timezone.utc)
+              return dt
+
+
+          def activity_entry_after_sha(entry, head_sha):
+              sha = head_sha.lower()
+              candidates = []
+              for key in ("after", "head"):
+                  val = entry.get(key)
+                  if isinstance(val, str):
+                      candidates.append(val.lower())
+              payload = entry.get("payload") or {}
+              for key in ("after", "head"):
+                  val = payload.get(key)
+                  if isinstance(val, str):
+                      candidates.append(val.lower())
+              return sha in candidates
+
+
+          def activity_entry_timestamp(entry):
+              for key in ("created_at", "timestamp", "pushed_at"):
+                  val = entry.get(key)
+                  if isinstance(val, str) and val.strip():
+                      return val.strip()
+              return None
+
+
+          def head_push_time_from_activity(repo, head_ref, head_sha):
+              ref_param = f"refs/heads/{head_ref}"
+              qref = urllib.parse.quote(ref_param, safe="")
+              page = 1
+              while True:
+                  batch = call(
+                      f"/repos/{repo}/activity?per_page=100&page={page}&ref={qref}",
+                      allow_404=True,
+                  )
+                  if batch is None:
+                      return None
+                  if not isinstance(batch, list):
+                      fail("unexpected repository activity shape")
+                  for item in batch:
+                      if activity_entry_after_sha(item, head_sha):
+                          ts = activity_entry_timestamp(item)
+                          if ts:
+                              return ts
+                  if len(batch) < 100:
+                      break
+                  page += 1
+              return None
+
+
+          def earliest_check_suite_created_at(repo, head_sha):
+              data = call(
+                  f"/repos/{repo}/commits/{head_sha}/check-suites",
+                  allow_404=True,
+              )
+              if not isinstance(data, dict):
+                  return None
+              suites = data.get("check_suites")
+              if not isinstance(suites, list) or not suites:
+                  return None
+              times = [s.get("created_at") for s in suites if s.get("created_at")]
+              return min(times) if times else None
+
+
+          def resolve_head_push_time(repo, head_ref, head_sha):
+              ts = head_push_time_from_activity(repo, head_ref, head_sha)
+              if ts:
+                  return ts, "activity"
+              ts = earliest_check_suite_created_at(repo, head_sha)
+              if ts:
+                  return ts, "check-suite"
+              return None, None
 
 
           def gate_owner_identity_matches(actor, owners):
@@ -2010,6 +2227,20 @@ jobs:
                   if login == elogin and uid == euid:
                       return True
               return False
+
+
+          def gate_owner_label_actor_ok(actor, labeled_event):
+              """Human gate owner only — not bot/App-mediated label events."""
+              login = ((actor or {}).get("login") or "").strip()
+              if login.lower().endswith("[bot]"):
+                  return False, f"label actor {login!r} is a bot login"
+              actor_type = ((actor or {}).get("type") or "").strip()
+              if actor_type and actor_type.lower() != "user":
+                  return False, f"label actor type {actor_type!r} is not User"
+              if labeled_event.get("performed_via_github_app"):
+                  app = labeled_event.get("performed_via_github_app")
+                  return False, f"label applied via GitHub App (performed_via_github_app={app!r})"
+              return True, None
 
 
           def paginate_issue_events(repo, number):
@@ -2046,16 +2277,7 @@ jobs:
               return out
 
 
-          def head_commit_committer_date(repo, head):
-              item = call(f"/repos/{repo}/commits/{head}")
-              commit = (item or {}).get("commit") or {}
-              ts = (commit.get("committer") or {}).get("date") or (commit.get("author") or {}).get("date")
-              if not ts:
-                  fail(f"commit {head[:12]} lacks committer timestamp; failing closed")
-              return ts
-
-
-          def owner_approval_valid_for_head(repo, number, head, owners_cfg):
+          def owner_approval_valid_for_head(repo, number, head, head_ref, owners_cfg):
               """Return (True, detail) when label owner-approved is audited for current head."""
               label = (owners_cfg.get("owner_approved_label") or "owner-approved").strip()
               owners = owners_cfg.get("gate_owners") or []
@@ -2075,23 +2297,39 @@ jobs:
               if newest.get("event") != "labeled":
                   return False, f"newest {label!r} timeline event is unlabeled"
               actor = newest.get("actor") or {}
+              ok_actor, actor_reason = gate_owner_label_actor_ok(actor, newest)
+              if not ok_actor:
+                  return False, actor_reason
               if not gate_owner_identity_matches(actor, owners):
                   login = (actor.get("login") or "?")
                   return False, f"{label!r} labeled event actor {login!r} is not a configured gate owner"
               labeled_at = newest.get("created_at") or ""
-              head_at = head_commit_committer_date(repo, head)
-              if labeled_at < head_at:
+              pushed_at, push_source = resolve_head_push_time(repo, head_ref, head)
+              if not pushed_at:
                   return False, (
-                      f"owner approval at {labeled_at} predates current head commit ({head_at}); "
-                      "re-apply label after push"
+                      "no server push time for current head "
+                      "(repository activity + check-suite fallback unavailable)"
+                  )
+              labeled_dt = parse_rfc3339(labeled_at, "labeled_at")
+              pushed_dt = parse_rfc3339(pushed_at, "pushed_at")
+              if labeled_dt <= pushed_dt:
+                  return False, (
+                      f"owner label at {labeled_at} not after head push at {pushed_at} "
+                      f"(source={push_source}); re-apply label after push"
                   )
               who = (actor.get("login") or "owner")
-              return True, f"owner-approved for head {head[:12]} by {who}"
+              via_app = newest.get("performed_via_github_app")
+              if via_app:
+                  print(f"{MODE}: owner-approved label performed_via_github_app={via_app!r}")
+              return True, f"owner-approved for head {head[:12]} by {who} (push {push_source})"
 
 
-          def owner_gate_passes(repo, number, head):
+          def owner_gate_passes(repo, number, head, head_ref):
               cfg = load_gate_owners_config()
-              ok, detail = owner_approval_valid_for_head(repo, number, head, cfg)
+              if cfg is None:
+                  print(f"{MODE}: owner override not satisfied (gate-owners.json missing at pin)")
+                  return False
+              ok, detail = owner_approval_valid_for_head(repo, number, head, head_ref, cfg)
               if ok:
                   print(f"{MODE}: {detail} (AG-06 owner override)")
                   return True
@@ -2697,7 +2935,7 @@ jobs:
                       p for p in paths if classify_agent_path_tier(p, denied) == "verdict_eligible"
                   )
                   if cris_only:
-                      if owner_gate_passes(REPO, number, head):
+                      if owner_gate_passes(REPO, number, head, head_ref):
                           for p in cris_only:
                               print(
                                   f"::notice file={p}::Cris-only path cleared by owner-approved (AG-06)"
@@ -2808,7 +3046,7 @@ jobs:
                   fail(f"open CHANGES_REQUESTED from {blocked}")
               ok = sorted(l for l, r in latest.items()
                           if approval_qualifies(r, head, allow, excluded, reviewer_bots))
-              if not ok and owner_gate_passes(REPO, number, head):
+              if not ok and owner_gate_passes(REPO, number, head, head_ref):
                   print(f"{MODE}: owner override satisfies review-of-record at {head[:12]}")
                   return
               if not ok:
