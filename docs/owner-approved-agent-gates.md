@@ -8,29 +8,30 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
 
 1. Config: **`rulesets/gate-owners.json`** at **`pins.agent_gates_sha`** (never the PR head).  
    - **`gate_owners`**: `{ login, user_id }` pairs (both required).  
-   - **`owner_approved_label`**: default **`owner-approved`**.
+   - **`owner_approved_label`**: default **`owner-approved`**.  
+   - **`allowed_label_apps`**: App ids and/or slugs allowed when GitHub sets **`performed_via_github_app`** on the label event (default **`[]`** — only human PAT/web UI labels until org adds Apps after live test-label).
 
 2. **Cris** (or another configured owner) applies **`owner-approved`** on the PR after reviewing the **current head**.
 
-3. Both pinned gates re-run on **`labeled`** / **`unlabeled`** (and existing PR events). They pass when:
+3. Both pinned gates re-run on **`labeled`** / **`unlabeled`** (and existing PR events). **`reviewer-app-auto-approve`** (`pull_request_target`) runs on label events **only** when the label is **`owner-approved`** (other labels do not mint App reviews or post fb-routing). Gates pass when:
    - the label is **present** on the PR;
-   - the **newest** timeline event for that label is **`labeled`** (not **`unlabeled`**) and the label name matches **`owner_approved_label`** only;
-   - the **`labeled`** event **actor** is a **`User`** matching a **`gate_owners`** entry (login + user id; not `*[bot]`, not `performed_via_github_app`);
-   - **Staleness (server push time):** `labeled_at` is **strictly after** the time the current head SHA was pushed to **`head_ref`**:
-     1. `GET /repos/{repo}/activity?ref=refs/heads/{head_ref}` — newest entry whose **`after`** equals head SHA;
-     2. if none: earliest **`check-suite`** `created_at` on that head SHA;
-     3. if still none: owner override **not satisfied** (fail closed).  
-     Commit author/committer dates are **not** used (forgable / backdatable).
+   - the **newest** timeline event for **`owner_approved_label`** is **`labeled`** (not **`unlabeled`**);
+   - the **`labeled`** event **actor** is a **`User`** matching a **`gate_owners`** entry (login + user id; not `*[bot]`);
+   - if **`performed_via_github_app`** is set, that App must be in **`allowed_label_apps`** (owner login+uid still required);
+   - **Staleness (server push time only):** `labeled_at` is **strictly after** the activity **`timestamp`** for the push that produced the current head on **`head_ref`**:
+     1. `GET /repos/{repo}/activity?direction=desc&per_page=100&ref=refs/heads/{head_ref}` — first entry whose **`after`** equals head SHA (uses activity **`timestamp`**, not commit author/committer dates);
+     2. optional bounded **`Link: rel="next"`** follow (cap **5** pages);
+     3. if no matching activity entry: owner override **not satisfied** (**no check-suite fallback**).
 
-4. **Scope:** Clears **Cris-only** **`agent-denied-paths`** failures and satisfies **`agent-review-of-record`** without a GitHub **APPROVE**. **DECISIONS #16** explicitly **carves out** decision **#14** for this path: **`madgeniusblink`** label approval counts for ROR **including madgeniusblink-authored PRs** (Cris may apply the label via agent tooling with Cris token). Does **not** override provider-control / projection hard-fails, open **CHANGES_REQUESTED**, or Sentinel security domains.
+4. **Scope:** Clears **Cris-only** **`agent-denied-paths`** failures and satisfies **`agent-review-of-record`** without a GitHub **APPROVE**. **DECISIONS #16** **carves out** decision **#14**: **`madgeniusblink`** label approval counts for ROR **including madgeniusblink-authored PRs** (Cris may apply via **cursor-github** / agent tooling). Does **not** override provider-control / projection hard-fails, open **CHANGES_REQUESTED**, or Sentinel security domains.
 
-5. **Logging:** when GitHub includes **`performed_via_github_app`** on the label event, the gate logs it (success path if ever present on a qualifying event; rejection path when App-mediated).
+5. **Logging:** when **`performed_via_github_app`** is present on an accepted label event, the gate logs the App payload.
 
 6. **Missing config:** if **`gate-owners.json`** is absent at the pin, owner override is **not satisfied** (gates keep failing; not a workflow hard-fail).
 
 ### ESC / edge cases
 
-- **Fork PRs** or repos where **activity** and **check-suite** data for the head SHA are unavailable: owner override cannot clear gates until push time is observable (re-label after checks exist, or merge from a human branch).
+- **Fork PRs** or repos where **repository activity** for `refs/heads/{head_ref}` does not expose a push with **`after == head`**: owner override cannot clear gates until activity is observable (re-label after push appears in activity, or merge from a human branch). Cross-branch check-suite timestamps do **not** substitute.
 
 ## Operator steps (fabricbloc example)
 

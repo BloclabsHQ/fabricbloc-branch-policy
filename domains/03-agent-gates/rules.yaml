@@ -19,6 +19,6 @@ rules:
       warn: "Default for one cycle; emits ::warning annotations"
       fail: "Blocks merge after warn cycle"
   AG-06:
-    summary: "Gate owner label owner-approved (config gate-owners.json) satisfies both agent gates at current head"
+    summary: "Gate owner label owner-approved (gate-owners.json + allowed_label_apps) satisfies both agent gates at current head push time"
     config: rulesets/gate-owners.json
     docs: docs/owner-approved-agent-gates.md

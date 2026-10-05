@@ -182,7 +182,7 @@ def owner_approved_labeled(created_at="2026-10-05T11:00:00Z", login="madgeniusbl
 
 
 def push_activity_entry(head=HEAD, pushed_at="2026-10-05T10:30:00Z"):
-    return {"after": head, "created_at": pushed_at}
+    return {"after": head, "timestamp": pushed_at}
 
 
 def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", author_id=None,
@@ -226,7 +226,13 @@ def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", au
     routes[f"/repos/{repo}/activity?ref={f'refs/heads/{ref}'}"] = (
         push_activity if push_activity is not None else []
     )
-    routes.update(policy_repo_routes(**(policy_routes_extra or {})))
+    extra = policy_routes_extra or {}
+    routes.update(
+        policy_repo_routes(
+            extra_gate_owners_by_ref=extra.get("extra_gate_owners_by_ref"),
+            canon_override=extra.get("canon_override"),
+        )
+    )
     commit_pulls = commit_pulls or {}
     for c in commits:
         sha = c.get("sha")
@@ -237,7 +243,6 @@ def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", au
             routes[key] = commit_pulls[sha]
         else:
             routes[key] = []
-    routes.update(policy_repo_routes())
     Fake.routes = routes
 
 
@@ -550,9 +555,9 @@ class T(unittest.TestCase):
         )
         code, out = run("agent-denied-paths")
         self.assertEqual(code, 1, out)
-        self.assertIn("no server push time", out)
+        self.assertIn("no repository activity push timestamp", out)
 
-    def test_owner_approval_check_suite_fallback(self):
+    def test_owner_approval_check_suite_fallback_removed(self):
         setup(
             files=(".github/workflows/ci.yml",),
             issue_labels=("owner-approved",),
@@ -561,7 +566,30 @@ class T(unittest.TestCase):
             check_suites=("2026-10-05T10:30:00Z",),
             **AGENT,
         )
-        self.assertEqual(run("agent-denied-paths")[0], 0)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("no repository activity push timestamp", out)
+
+    def test_cross_branch_check_suite_predate_does_not_bypass_activity_miss(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(created_at="2026-10-05T12:00:00Z"),),
+            push_activity=[],
+            check_suites=("2026-10-05T09:00:00Z",),
+            **AGENT,
+        )
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_activity_entry_requires_timestamp_field(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(),),
+            push_activity=[{"after": HEAD, "created_at": "2026-10-05T10:30:00Z"}],
+            **AGENT,
+        )
+        self.assertEqual(run("agent-denied-paths")[0], 1)
 
     def test_owner_approval_wrong_actor_fails(self):
         setup(
@@ -599,19 +627,61 @@ class T(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("bot", out.lower())
 
-    def test_owner_approval_github_app_event_fails(self):
+    def test_owner_approval_github_app_event_fails_when_allowlist_empty(self):
         setup(
             files=(".github/workflows/ci.yml",),
             issue_labels=("owner-approved",),
             issue_events=(owner_approved_labeled(
-                performed_via_github_app={"name": "Some App"},
+                performed_via_github_app={"id": 999, "slug": "evil-app", "name": "Evil"},
             ),),
             push_activity=[push_activity_entry()],
             **AGENT,
         )
         code, out = run("agent-denied-paths")
         self.assertEqual(code, 1, out)
-        self.assertIn("performed_via_github_app", out)
+        self.assertIn("allowed_label_apps", out)
+
+    def test_owner_approval_allowed_github_app_passes(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        pin = "cafebabecafebabecafebabecafebabecafebabe"
+        canon.setdefault("pins", {})["agent_gates_sha"] = pin
+        owners_cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
+        owners_cfg["allowed_label_apps"] = [1210556]
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(
+                performed_via_github_app={"id": 1210556, "slug": "cursor"},
+            ),),
+            push_activity=[push_activity_entry()],
+            policy_routes_extra={
+                "extra_gate_owners_by_ref": {pin: owners_cfg},
+                "canon_override": canon,
+            },
+            **AGENT,
+        )
+        self.assertEqual(run("agent-denied-paths")[0], 0)
+
+    def test_owner_approval_disallowed_github_app_fails(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        pin = "cafebabecafebabecafebabecafebabecafebabe"
+        canon.setdefault("pins", {})["agent_gates_sha"] = pin
+        owners_cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
+        owners_cfg["allowed_label_apps"] = ["cursor"]
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(
+                performed_via_github_app={"id": 999, "slug": "other-app"},
+            ),),
+            push_activity=[push_activity_entry()],
+            policy_routes_extra={
+                "extra_gate_owners_by_ref": {pin: owners_cfg},
+                "canon_override": canon,
+            },
+            **AGENT,
+        )
+        self.assertEqual(run("agent-denied-paths")[0], 1)
 
     def test_non_owner_relabel_after_owner_fails(self):
         setup(
@@ -769,8 +839,9 @@ class T(unittest.TestCase):
                 {"login": "madgeniusblink", "id": 1}, owners
             )
         )
+        cfg = {"allowed_label_apps": []}
         ok, _ = ns["gate_owner_label_actor_ok"](
-            {"login": "madgeniusblink", "id": 42707764, "type": "User"}, {}
+            {"login": "madgeniusblink", "id": 42707764, "type": "User"}, {}, cfg
         )
         self.assertTrue(ok)
 
@@ -1245,6 +1316,7 @@ class T(unittest.TestCase):
         self.assertEqual(mint.get("environment"), "reviewer")
         mint_if = mint.get("if") or ""
         self.assertIn("pull_request_target", mint_if)
+        self.assertIn("owner-approved", mint_if)
         gate_step = gate["steps"][0]
         gate_env = gate_step.get("env") or {}
         self.assertEqual(gate_env.get("ROR_JOB"), "gate")

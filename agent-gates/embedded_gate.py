@@ -82,6 +82,8 @@ REVIEWERS_JSON = "rulesets/reviewers.json"
 GATE_OWNERS_JSON = "rulesets/gate-owners.json"
 CANON_JSON = "rulesets/canon.json"
 MAX_ISSUE_EVENTS = 10000
+MAX_ACTIVITY_PAGES = 5
+LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 MAX_ISSUE_COMMENTS = 10000
 HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
 _BOT_TYPES = "feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style"
@@ -190,6 +192,49 @@ def call(path, accept="application/vnd.github+json", allow_404=False, method="GE
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         fail(f"GitHub API unreachable ({type(exc).__name__}); failing closed")
     return body if accept.endswith(".raw") else json.loads(body or "null")
+
+
+def call_list_with_link(path, allow_404=False):
+    """GET JSON list; return (parsed_list_or_none, Link header)."""
+    headers = {
+        "Authorization": f"Bearer {TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "fabricbloc-agent-gates",
+    }
+    req = urllib.request.Request(API + path, method="GET", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            link = resp.headers.get("Link")
+            raw = resp.read().decode()
+    except urllib.error.HTTPError as exc:
+        if allow_404 and exc.code == 404:
+            return None, None
+        fail(f"GitHub API {exc.code} on {path.split('?')[0]}; failing closed")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        fail(f"GitHub API unreachable ({type(exc).__name__}); failing closed")
+    data = json.loads(raw or "null")
+    if not isinstance(data, list):
+        fail(f"unexpected API shape for {path.split('?')[0]} (expected list)")
+    return data, link
+
+
+def activity_next_path(link_header):
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        piece = part.strip()
+        if 'rel="next"' not in piece:
+            continue
+        m = LINK_NEXT_RE.search(piece)
+        if not m:
+            continue
+        parsed = urllib.parse.urlparse(m.group(1))
+        api_host = urllib.parse.urlparse(API).netloc
+        if parsed.netloc and api_host and parsed.netloc != api_host:
+            fail("repository activity Link next URL leaves API host; failing closed")
+        return parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    return None
 
 
 def paginate(path, cap, fail_at_cap=False):
@@ -568,60 +613,77 @@ def activity_entry_after_sha(entry, head_sha):
     return sha in candidates
 
 
-def activity_entry_timestamp(entry):
-    for key in ("created_at", "timestamp", "pushed_at"):
-        val = entry.get(key)
-        if isinstance(val, str) and val.strip():
-            return val.strip()
+def activity_entry_push_timestamp(entry):
+    """Repository activity uses `timestamp` (not commit author/committer dates)."""
+    val = entry.get("timestamp")
+    if isinstance(val, str) and val.strip():
+        return val.strip()
     return None
 
 
 def head_push_time_from_activity(repo, head_ref, head_sha):
     ref_param = f"refs/heads/{head_ref}"
     qref = urllib.parse.quote(ref_param, safe="")
-    page = 1
-    while True:
-        batch = call(
-            f"/repos/{repo}/activity?per_page=100&page={page}&ref={qref}",
-            allow_404=True,
-        )
+    path = f"/repos/{repo}/activity?per_page=100&direction=desc&ref={qref}"
+    next_path = path
+    pages = 0
+    while next_path and pages < MAX_ACTIVITY_PAGES:
+        batch, link = call_list_with_link(next_path, allow_404=(pages == 0))
         if batch is None:
             return None
-        if not isinstance(batch, list):
-            fail("unexpected repository activity shape")
         for item in batch:
             if activity_entry_after_sha(item, head_sha):
-                ts = activity_entry_timestamp(item)
+                ts = activity_entry_push_timestamp(item)
                 if ts:
                     return ts
-        if len(batch) < 100:
-            break
-        page += 1
+        next_path = activity_next_path(link)
+        pages += 1
     return None
-
-
-def earliest_check_suite_created_at(repo, head_sha):
-    data = call(
-        f"/repos/{repo}/commits/{head_sha}/check-suites",
-        allow_404=True,
-    )
-    if not isinstance(data, dict):
-        return None
-    suites = data.get("check_suites")
-    if not isinstance(suites, list) or not suites:
-        return None
-    times = [s.get("created_at") for s in suites if s.get("created_at")]
-    return min(times) if times else None
 
 
 def resolve_head_push_time(repo, head_ref, head_sha):
     ts = head_push_time_from_activity(repo, head_ref, head_sha)
     if ts:
         return ts, "activity"
-    ts = earliest_check_suite_created_at(repo, head_sha)
-    if ts:
-        return ts, "check-suite"
     return None, None
+
+
+def label_app_allowed(app_obj, allowed_entries):
+    if not app_obj:
+        return True
+    if not allowed_entries:
+        return False
+    try:
+        app_id = int(app_obj.get("id")) if app_obj.get("id") is not None else None
+    except (TypeError, ValueError):
+        app_id = None
+    slug = ((app_obj.get("slug") or "") or "").strip().lower()
+    for entry in allowed_entries:
+        if isinstance(entry, bool):
+            continue
+        if isinstance(entry, int):
+            if app_id is not None and entry == app_id:
+                return True
+            continue
+        if isinstance(entry, str):
+            s = entry.strip()
+            if s.isdigit():
+                if app_id is not None and int(s) == app_id:
+                    return True
+            elif slug and s.lower() == slug:
+                return True
+            continue
+        if isinstance(entry, dict):
+            try:
+                eid = int(entry.get("id")) if entry.get("id") is not None else None
+            except (TypeError, ValueError):
+                eid = None
+            eslug = (entry.get("slug") or "").strip().lower()
+            if eid is not None and app_id is not None and eid == app_id:
+                return True
+            if eslug and slug and eslug == slug:
+                return True
+    return False
 
 
 def gate_owner_identity_matches(actor, owners):
@@ -644,17 +706,23 @@ def gate_owner_identity_matches(actor, owners):
     return False
 
 
-def gate_owner_label_actor_ok(actor, labeled_event):
-    """Human gate owner only — not bot/App-mediated label events."""
+def gate_owner_label_actor_ok(actor, labeled_event, owners_cfg):
+    """Gate owner User; GitHub App labels only when app is in allowed_label_apps."""
     login = ((actor or {}).get("login") or "").strip()
     if login.lower().endswith("[bot]"):
         return False, f"label actor {login!r} is a bot login"
     actor_type = ((actor or {}).get("type") or "").strip()
     if actor_type and actor_type.lower() != "user":
         return False, f"label actor type {actor_type!r} is not User"
-    if labeled_event.get("performed_via_github_app"):
-        app = labeled_event.get("performed_via_github_app")
-        return False, f"label applied via GitHub App (performed_via_github_app={app!r})"
+    app = labeled_event.get("performed_via_github_app")
+    if app:
+        allowed = (owners_cfg or {}).get("allowed_label_apps") or []
+        if not label_app_allowed(app, allowed):
+            return False, (
+                f"label GitHub App {app!r} not in allowed_label_apps "
+                f"(configured {len(allowed)} entries)"
+            )
+        print(f"{MODE}: owner-approved label performed_via_github_app={app!r}")
     return True, None
 
 
@@ -712,7 +780,7 @@ def owner_approval_valid_for_head(repo, number, head, head_ref, owners_cfg):
     if newest.get("event") != "labeled":
         return False, f"newest {label!r} timeline event is unlabeled"
     actor = newest.get("actor") or {}
-    ok_actor, actor_reason = gate_owner_label_actor_ok(actor, newest)
+    ok_actor, actor_reason = gate_owner_label_actor_ok(actor, newest, owners_cfg)
     if not ok_actor:
         return False, actor_reason
     if not gate_owner_identity_matches(actor, owners):
@@ -722,8 +790,8 @@ def owner_approval_valid_for_head(repo, number, head, head_ref, owners_cfg):
     pushed_at, push_source = resolve_head_push_time(repo, head_ref, head)
     if not pushed_at:
         return False, (
-            "no server push time for current head "
-            "(repository activity + check-suite fallback unavailable)"
+            "no repository activity push timestamp for current head "
+            f"(refs/heads/{head_ref}, after={head[:12]})"
         )
     labeled_dt = parse_rfc3339(labeled_at, "labeled_at")
     pushed_dt = parse_rfc3339(pushed_at, "pushed_at")
@@ -733,9 +801,6 @@ def owner_approval_valid_for_head(repo, number, head, head_ref, owners_cfg):
             f"(source={push_source}); re-apply label after push"
         )
     who = (actor.get("login") or "owner")
-    via_app = newest.get("performed_via_github_app")
-    if via_app:
-        print(f"{MODE}: owner-approved label performed_via_github_app={via_app!r}")
     return True, f"owner-approved for head {head[:12]} by {who} (push {push_source})"
 
 
