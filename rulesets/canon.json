@@ -18,7 +18,7 @@
   "pins": {
     "agent_gates_sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf",
     "branch_name_guard_sha": "80ee4b19ad84f4cdb5dc1e923e19f54fc54a2c6a",
-    "hygiene_sha": "1ddbd5bc04e4d7afa69be602aceede299774624d",
+    "hygiene_sha": "06cfa0c886579256acdf260cc650f04bcb3371fe",
     "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit. issue_link_enforce_after: warn-only until this UTC instant; set org/repo var ISSUE_LINK_ENFORCE_AFTER to match before apply (var may only move earlier).",
     "issue_link_enforce_after": "2026-10-07T03:00:00Z",
     "legacy_branch_pr_created_before": "2026-10-19T00:00:00Z",
@@ -90,8 +90,9 @@
     },
     {
       "name": "canon-wallet-green-ci",
-      "_finding": "Warden: fabric-wallet merged to dev/main while CI red or pending (#1433, #1435). Founder yes WALLET-GREEN-CI recorded 2026-10-05 01:01 PT (Cris via MadGeniusBot); apply after policy PR #47 merges.",
-      "_apply_after": "README: merge fabricbloc-branch-policy PR #47; org-owner applies this ruleset (MadGeniusBot)",
+      "_finding": "Warden: fabric-wallet merged to dev/main while CI red or pending (#1433, #1435). Founder yes WALLET-GREEN-CI recorded 2026-10-05 01:01 PT (Cris via MadGeniusBot).",
+      "_apply_after": "Done (2026-10-05 PT): policy PR #47 merged (06cfa0c); MadGeniusBot applied live org ruleset 24489464 on fabric-wallet",
+      "_live_ruleset_id": 24489464,
       "_comment": "Org ruleset scoped by repository_name.include (add repo short names to extend). Job-level skips in ci.yml report success when docs-only; do not add Detect changes as required.",
       "target": "branch",
       "enforcement": "active",
