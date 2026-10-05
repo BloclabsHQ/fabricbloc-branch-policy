@@ -32,14 +32,10 @@ def fail(msg):
     sys.exit(1)
 
 
-def fetch_bots_json_from_api():
-    policy_repo = os.environ.get("POLICY_REPO", "BloclabsHQ/fabricbloc-branch-policy")
-    token = os.environ.get("GH_TOKEN", "")
-    if not token:
-        fail("GH_TOKEN missing; cannot load rulesets/bots.json")
+def fetch_bots_json_at_ref(policy_repo, token, ref):
     q = urllib.parse.quote("rulesets/bots.json", safe="")
     req = urllib.request.Request(
-        f"{API}/repos/{policy_repo}/contents/{q}?ref=main",
+        f"{API}/repos/{policy_repo}/contents/{q}?ref={urllib.parse.quote(ref, safe='')}",
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github.raw",
@@ -47,11 +43,31 @@ def fetch_bots_json_from_api():
             "User-Agent": "branch-name-guard",
         },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode())
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
-        fail(f"cannot load rulesets/bots.json from {policy_repo}@main: {exc}")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode())
+
+
+def fetch_bots_json_from_api():
+    policy_repo = os.environ.get("POLICY_REPO", "BloclabsHQ/fabricbloc-branch-policy")
+    token = os.environ.get("GH_TOKEN", "")
+    if not token:
+        fail("GH_TOKEN missing; cannot load rulesets/bots.json")
+    primary = os.environ.get("BOTS_JSON_REF", "").strip() or "main"
+    refs = [primary]
+    if primary != "main":
+        refs.append("main")
+    last_exc = None
+    for ref in refs:
+        try:
+            return fetch_bots_json_at_ref(policy_repo, token, ref)
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code == 404:
+                continue
+            fail(f"cannot load rulesets/bots.json from {policy_repo}@{ref}: {exc}")
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            fail(f"cannot load rulesets/bots.json from {policy_repo}@{ref}: {exc}")
+    fail(f"cannot load rulesets/bots.json from {policy_repo} (tried {', '.join(refs)}): {last_exc}")
 
 
 def load_bots():
