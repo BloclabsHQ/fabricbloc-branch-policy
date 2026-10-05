@@ -1,6 +1,12 @@
 {
   "_comment": "Fallback routing when fabricbloc-reviewer App cannot auto-approve. Path globs use fnmatch (** supported). Highest priority wins.",
-  "verdict_approval_enabled": false,
+  "verdict_approval_enabled": true,
+  "verdict_app": {
+    "login": "fabricbloc-verdict[bot]",
+    "user_id": 337980250,
+    "app_id": 5193724,
+    "_note": "Gate matches comment author by login AND user_id together (not login alone). PEM distribution still pending from Cris."
+  },
   "default_reviewer": "madagentpm",
   "deterministic_auto_approve_exclusions": [
     ".github/**",

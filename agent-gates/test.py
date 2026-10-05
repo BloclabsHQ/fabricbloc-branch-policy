@@ -317,10 +317,14 @@ def assert_canon_push_paths_covered_by_floor():
         if pattern in FLOOR_DENIED_CANON_EXCEPTIONS:
             continue
         covered = False
+        classify = ns["classify_agent_path_tier"]
         for probe in _canon_pattern_probe_paths(pattern):
             if not match_glob(probe, pattern):
                 continue
             if any(match_entry(probe, entry) for entry in floor):
+                covered = True
+                break
+            if classify(probe, list(ns["FLOOR_DENIED"])) in ("cris_only", "verdict_eligible"):
                 covered = True
                 break
         if not covered:
@@ -624,8 +628,8 @@ class T(unittest.TestCase):
 
         def patch(body):
             return body.replace(
-                "        if bad:\n            fail(f\"{len(bad)} denied path(s)\")",
-                "        if False and bad:\n            fail(f\"{len(bad)} denied path(s)\")",
+                "        if cris_only:\n            fail(f\"{len(cris_only)} Cris-only denied path(s)\")",
+                "        if False and cris_only:\n            fail(f\"{len(cris_only)} Cris-only denied path(s)\")",
                 1,
             )
 
@@ -988,6 +992,30 @@ class T(unittest.TestCase):
         code, out = run("agent-denied-paths")
         self.assertEqual(code, 1, out)
         self.assertIn("denied path", out)
+
+    def test_verdict_eligible_adr_passes_denied_paths(self):
+        setup(files=("architecture/decisions/ARCH-0045.md",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Verdict-eligible", out)
+
+    def test_verdict_eligible_engine_test_md_passes(self):
+        setup(
+            files=(
+                "agents/runtime/engine/tests/test_policy.py",
+                "agents/runtime/engine/README.md",
+            ),
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Verdict-eligible", out)
+
+    def test_engine_py_outside_tests_still_cris_only(self):
+        setup(files=("agents/runtime/engine/runner.py",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("Cris-only", out)
 
     def test_context_creation_restricted_shape(self):
         assert_creation_restricted_shape(load_canon(), repository="context")

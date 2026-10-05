@@ -2,27 +2,36 @@
 
 Canon: `rulesets/reviewers.json` loaded from `fabricbloc-branch-policy` at **`pins.agent_gates_sha`** (never the PR head). See `docs/REVIEWER-IDENTITY.md`.
 
-## Auto-approve (today)
+## Auto-approve
 
-**`verdict_approval_enabled`** is **`false`**. Verdict comments do not trigger App approval.
+**fabricbloc-verdict** posts PR **comments** (Issues API). **fabricbloc-reviewer** (App **5185203**, bot **337673700**) submits the GitHub **APPROVE** after the gate validates verdicts or deterministic allowlist rules.
 
-**fabricbloc-reviewer** (App **5185203**, bot **337673700**) may submit APPROVE only when:
+**Two-tier agent-denied-paths**
 
-- `agent-denied-paths` is **success** on the head commit,
-- **every** changed path (new **and** `previous_filename` on renames) passes **deny → route → allow** (case-insensitive): not on **`deterministic_auto_approve_exclusions`**, not matching any **reviewer route**, not on **agent-denied-paths** floor/manifest, and allowed by **pinned extension policy** in `embedded_gate.py` (doc/data extensions under `docs/`, `**/fixtures/**`, or `**/testdata/**` only; no `.svg`/`.html`/`.htm`),
-- no **cris_required** route on the PR set, and
-- `REVIEWER_APP_TOKEN` is minted (requires org/repo **`REVIEWER_APP_CLIENT_ID`** var + **`REVIEWER_APP_PRIVATE_KEY`** secret). If the key is missing, the workflow **skips** token mint with a notice (no fail solely for missing key).
+- **Cris-only** — check **fails** (workflows, engine code/manifests/approval_relay, GOV-* ADRs, rulesets, canon files, floor/manifest entries, unsafe paths).
+- **Verdict-eligible** — check **passes** with a notice; **review-of-record** needs PASS markers from **fabricbloc-verdict[bot]** for every required reviewer slug.
+
+**fabricbloc-reviewer** may submit APPROVE when:
+
+- Newest **`agent-denied-paths`** run from GitHub Actions **app id 15368** is **success** on head,
+- No **Cris-only** paths in the diff (including `previous_filename` on renames),
+- **Verdict path** (`verdict_approval_enabled: true`): every required reviewer has an unedited, unfenced PASS at head from **`verdict_app`** (**fabricbloc-verdict[bot]** / **337980250**; both must match). Any slug FAIL at head blocks approval. **`user_id: 0` fails closed** if ever reintroduced,
+- **Deterministic** path (unchanged): pure allowlisted docs/fixtures under pinned extension policy, no routes/exclusions/Cris-only/verdict-eligible paths,
+- No **cris_required** route, and
+- `REVIEWER_APP_TOKEN` minted when submitting APPROVE (missing key → skip with notice).
 
 ## Routing (priority)
 
 Highest **`priority`** route wins: cris (prod/IAM/secrets) → sentinel (auth/crypto, `src/auth`, fabric-wallet) → warden (policy/workflows) → aether (iac/infra) → default **madagentpm**.
 
-## Verdict markers (when enabled)
+## Verdict markers
 
-Trusted identities are **`(login, user_id)`** pairs in `trusted_verdict_identities` — never PR author or commit participants. Marker must match routed reviewer and head SHA; edited comments and fenced code blocks are ignored.
+Only **fabricbloc-verdict[bot]** (pinned in **`verdict_app`**) may post markers. Reviewer slug must be one of **`madagentpm`**, **`sentinel`**, **`aether`**, **`warden`**. **`head`** must equal the PR head SHA (40 hex). Edited comments and fenced code blocks are ignored.
 
 ```html
-<!-- fb-verdict: PASS reviewer=madagentpm sha=<40-char PR head SHA> -->
+<!-- fabricbloc-verdict v1 reviewer=madagentpm verdict=PASS head=<40-char PR head SHA> -->
 ```
+
+Required slugs: **`madagentpm`** always; route reviewer from `reviewers.json`; plus **`aether`** (+ **`sentinel`** when sensitive) for non-GOV ADRs; **`sentinel`** for verdict-eligible engine tests/docs.
 
 Human GOV-0022 PRs still skip agent gates (F6-D2/D3).
