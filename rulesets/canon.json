@@ -52,7 +52,7 @@
       },
       "bypass_actors": [],
       "_bypass_note": "Empty on purpose (decision F6-D2). No standing bypass on canon-agent-gates: break-glass is an org owner sets enforcement to Disabled (org audit log); fabricbloc cursor-env drift opens an issue while disabled. The gates pass at once for GOV-0022 human PRs to main, so nobody needs a bypass. An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
-      "_agent_approval_note": "Agent PRs need one non-author APPROVE at head (PR-C): fabricbloc-reviewer App after trusted fb-verdict marker, or human. No org pull_request required_approving_review_count here — that would also bind human GOV-0022 PRs.",
+      "_agent_approval_note": "Agent PRs need one non-author APPROVE at head (PR-C): fabricbloc-reviewer App after trusted fb-verdict marker, or human. Org pull_request required_approving_review_count: 1 is NOT in this ruleset (GOV-0033 D1 = 0); see docs/PR-D2-gov-0033-d1-amendment.md if Cris amends D1.",
       "_workflow_rollout_note": "gate-issue-link.yml lands in PR-A; re-pin all workflows[].sha and pins.agent_gates_sha to one main squash after PR-A–C merge before org apply.",
       "rules": [
         {
