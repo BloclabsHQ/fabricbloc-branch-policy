@@ -426,6 +426,27 @@ def manifest_at(sha):
         fail("base manifest is not valid JSON")
 
 
+def humans_from_manifest(manifest):
+    """GOV-0022 allowlist from base manifest; floor when members_expected is missing or empty."""
+    raw = (manifest.get("operators") or {}).get("members_expected") or []
+    humans = {h for h in raw if h}
+    if not humans:
+        humans = set(GOV_HUMAN_HANDLES)
+    return humans
+
+
+def review_of_record_allowlist(humans, cfg, reviewer_bots):
+    """Review-of-record allowlist: manifest humans, engine config, pinned reviewer App bots."""
+    allow = set(humans)
+    if cfg:
+        for key in ("human", "ai_reviewers"):
+            parsed = parse_flow_list_line(cfg, key)
+            if parsed not in (None, False):
+                allow |= parsed
+    allow |= {login for login, _ in reviewer_bots}
+    return allow
+
+
 def participants(commits, allow, author):
     out = {author} if author else set()
     for c in commits:
@@ -1024,7 +1045,7 @@ def main():
     author_type = (pr.get("user") or {}).get("type") or ""
     author_id = (pr.get("user") or {}).get("id")
     manifest = manifest_at(base_sha)
-    humans = set((manifest.get("operators") or {}).get("members_expected") or [])
+    humans = humans_from_manifest(manifest)
     cfg = base_text(ENGINE_CONFIG, base_sha)
     ai_rev = ai_reviewers_from_cfg(cfg)
     reported_commits = int(pr.get("commits") or 0)
@@ -1150,12 +1171,7 @@ def main():
         return
 
     # agent-review-of-record: ai_reviewers may approve; they never qualify for human skip.
-    allow = set(humans)
-    if cfg:
-        for key in ("human", "ai_reviewers"):
-            parsed = parse_flow_list_line(cfg, key)
-            if parsed not in (None, False):
-                allow |= parsed
+    allow = review_of_record_allowlist(humans, cfg, reviewer_bots)
     if not allow:
         fail("no reviewer allowlist at base (manifest operators.members_expected)")
     excluded = participants(commits, allow, author)

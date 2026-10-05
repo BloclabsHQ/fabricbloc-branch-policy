@@ -842,6 +842,51 @@ class T(unittest.TestCase):
         )
         self.assertEqual(run("agent-review-of-record")[0], 1)
 
+    def test_humans_from_manifest_empty_floors_gov_handles(self):
+        ns = load_gate_constants()
+        self.assertEqual(
+            ns["humans_from_manifest"]({}),
+            set(ns["GOV_HUMAN_HANDLES"]),
+        )
+        self.assertEqual(
+            ns["humans_from_manifest"]({"operators": {"members_expected": []}}),
+            set(ns["GOV_HUMAN_HANDLES"]),
+        )
+
+    def test_review_of_record_allowlist_empty_manifest_includes_reviewer_bot(self):
+        ns = load_gate_constants()
+        humans = ns["humans_from_manifest"]({})
+        allow = ns["review_of_record_allowlist"](humans, None, ns["REVIEWER_APP_BOTS"])
+        self.assertIn(ns["GOV_HUMAN_HANDLES"][0], allow)
+        self.assertIn(REVIEWER_BOT, allow)
+
+    def test_review_of_record_allowlist_empty_inputs_stays_empty(self):
+        ns = load_gate_constants()
+        self.assertEqual(ns["review_of_record_allowlist"](set(), None, set()), set())
+
+    def test_context_empty_manifest_review_not_blocked_on_allowlist(self):
+        setup(
+            files=("docs/x.md",),
+            manifest={},
+            repo="BloclabsHQ/context",
+            reviews=[],
+            **AGENT,
+        )
+        code, out = run("agent-review-of-record", repo="BloclabsHQ/context")
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("no reviewer allowlist", out)
+
+    def test_gate_workflows_checks_write_permission(self):
+        for name in GATES:
+            perms = yaml.safe_load((WF / f"{name}.yml").read_text()).get("permissions") or {}
+            self.assertEqual(
+                perms.get("checks"),
+                "write",
+                f"{name}.yml must grant checks: write so the job can publish check runs",
+            )
+        ror = yaml.safe_load((WF / "agent-review-of-record.yml").read_text()).get("permissions") or {}
+        self.assertEqual(ror.get("issues"), "write")
+
     def test_reviewer_app_approval_at_head_valid_body_passes(self):
         cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
         setup(files=("docs/x.md",),
