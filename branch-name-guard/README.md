@@ -10,7 +10,9 @@ Canonical logic: `guard_logic.py` (embedded in `.github/workflows/branch-name-gu
 
 ## Phase-in
 
-Set org/repo var **`LEGACY_BRANCH_PR_CREATED_BEFORE`** to match `pins.legacy_branch_pr_created_before` in `rulesets/canon.json`. After that instant, legacy grammar is allowed only when the **pull request `created_at`** is earlier. Until every producer emits bot grammar, the cutoff must not be treated as live.
+Legacy phase-in defaults to **`2026-10-19T00:00:00Z`** (embedded from `pins.legacy_branch_pr_created_before`). Optional var **`LEGACY_BRANCH_PR_CREATED_BEFORE`** may only move that cutoff **earlier**, never later. After the effective cutoff, legacy grammar is allowed only when **pull request `created_at`** is earlier.
+
+`rulesets/bots.json` is loaded from the org pin SHA (`POLICY_BOTS_JSON_SHA` / `pins.branch_name_guard_sha`) or `main` — **never PR head**. If absent at those refs, embedded `SYNCED_BOT_SLUGS` (from `sync_embedded.py`) is used until main carries `bots.json`.
 
 `attributed_bot` in the run summary is a **routing hint only** — not authority (GOV-0033 D5).
 

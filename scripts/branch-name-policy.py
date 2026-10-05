@@ -61,10 +61,23 @@ def session_branch_regex():
     return LEGACY_AGENT_RE.pattern
 
 
-def agent_re_for_engine_manifest(bots=None):
+def _strip_regex_anchors(pattern):
+    if pattern.startswith("^") and pattern.endswith("$"):
+        return pattern[1:-1]
+    return pattern
+
+
+def agent_re_combined(bots=None):
     """Harness/engine: accept legacy session/autonomous or registered bot grammar."""
     bots = bots or load_bot_slugs()
-    return bot_branch_regex_from_bots(bots)
+    legacy = _strip_regex_anchors(LEGACY_AGENT_RE.pattern)
+    bot = _strip_regex_anchors(bot_branch_regex_from_bots(bots))
+    return f"^({legacy}|{bot})$"
+
+
+def agent_re_for_engine_manifest(bots=None):
+    """Alias for combined agent branch regex (legacy + bot)."""
+    return agent_re_combined(bots)
 
 
 WORKFLOW_LITERALS = (

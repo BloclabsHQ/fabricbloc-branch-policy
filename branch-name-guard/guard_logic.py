@@ -24,12 +24,64 @@ SLUG = r"[a-z0-9]+(-[a-z0-9]+)+"
 TYPES_ALT = "|".join(AGENT_TYPES)
 RESERVED_BOT_SLUGS = frozenset({"session", "autonomous", "cursor", "codex", "claude", "qwen"})
 LEGACY_AGENT_RE = re.compile(rf"^agent/(session|autonomous)/({TYPES_ALT})/{SLUG}$")
+# Embedded from rulesets/canon.json (re-pin with branch_name_guard_sha when bots.json changes on main).
+CANON_LEGACY_BRANCH_PR_CREATED_BEFORE = "2026-10-19T00:00:00Z"
+CANON_BOTS_JSON_SHA = "e8a5985f5ebf7b3795716b29fb3778e9842a3e25"
+SYNCED_BOT_SLUGS = ['aether', 'anvil', 'cursoragent', 'loom', 'madagentpm', 'madengineer', 'madgeniusbot', 'sentinel', 'sweeper', 'warden']  # auto-sync from rulesets/bots.json
 API = os.environ.get("API", "https://api.github.com").rstrip("/")
 
 
 def fail(msg):
     print(f"::error::{MODE}: {msg}")
     sys.exit(1)
+
+
+def warn(msg):
+    print(f"::warning::{MODE}: {msg}")
+
+
+def _has_explicit_tz(text):
+    if text.endswith("Z"):
+        return True
+    if len(text) >= 6 and text[-6] in "+-" and text[-3] == ":":
+        return True
+    if len(text) >= 5 and text[-5] in "+-" and text[-3].isdigit():
+        return True
+    return False
+
+
+def parse_timestamp(raw, label):
+    if raw is None or not str(raw).strip():
+        return None
+    text = str(raw).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    elif not _has_explicit_tz(text):
+        if "T" not in text:
+            fail(f"{label} must be ISO-8601 with timezone (got {raw!r})")
+        text = text + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        fail(f"{label} is not valid ISO-8601: {raw!r}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def effective_legacy_cutoff():
+    canon = parse_timestamp(CANON_LEGACY_BRANCH_PR_CREATED_BEFORE, "canon legacy_branch_pr_created_before")
+    raw = os.environ.get("LEGACY_BRANCH_PR_CREATED_BEFORE", "").strip()
+    if not raw:
+        return canon
+    var = parse_timestamp(raw, "LEGACY_BRANCH_PR_CREATED_BEFORE")
+    if var > canon:
+        warn(
+            f"LEGACY_BRANCH_PR_CREATED_BEFORE {raw!r} is later than canon "
+            f"{CANON_LEGACY_BRANCH_PR_CREATED_BEFORE}; using canon (var may only move cutoff earlier)"
+        )
+        return canon
+    return var
 
 
 def fetch_bots_json_at_ref(policy_repo, token, ref):
@@ -48,14 +100,16 @@ def fetch_bots_json_at_ref(policy_repo, token, ref):
 
 
 def fetch_bots_json_from_api():
+    """Trusted refs only (org pin + main) — never PR head."""
     policy_repo = os.environ.get("POLICY_REPO", "BloclabsHQ/fabricbloc-branch-policy")
     token = os.environ.get("GH_TOKEN", "")
     if not token:
-        fail("GH_TOKEN missing; cannot load rulesets/bots.json")
-    primary = os.environ.get("BOTS_JSON_REF", "").strip() or "main"
-    refs = [primary]
-    if primary != "main":
-        refs.append("main")
+        return None
+    pin = os.environ.get("POLICY_BOTS_JSON_SHA", "").strip() or CANON_BOTS_JSON_SHA
+    refs = []
+    for ref in (pin, "main"):
+        if ref and ref not in refs:
+            refs.append(ref)
     last_exc = None
     for ref in refs:
         try:
@@ -67,22 +121,15 @@ def fetch_bots_json_from_api():
             fail(f"cannot load rulesets/bots.json from {policy_repo}@{ref}: {exc}")
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             fail(f"cannot load rulesets/bots.json from {policy_repo}@{ref}: {exc}")
-    fail(f"cannot load rulesets/bots.json from {policy_repo} (tried {', '.join(refs)}): {last_exc}")
+    if last_exc:
+        warn(
+            f"rulesets/bots.json not found at pinned refs ({', '.join(refs)}); "
+            f"using SYNCED_BOT_SLUGS from policy sync"
+        )
+    return None
 
 
-def load_bots():
-    raw = os.environ.get("BOTS_JSON", "").strip()
-    if raw:
-        data = json.loads(raw)
-    else:
-        try:
-            path = Path(__file__).resolve().parents[1] / "rulesets" / "bots.json"
-        except (RuntimeError, OSError, IndexError):
-            path = None
-        if path is not None and path.is_file():
-            data = json.loads(path.read_text())
-        else:
-            data = fetch_bots_json_from_api()
+def _bots_from_data(data):
     bots = []
     for b in data.get("bots") or []:
         if not isinstance(b, str) or not re.fullmatch(r"[a-z0-9-]+", b):
@@ -96,41 +143,43 @@ def load_bots():
     return bots
 
 
+def load_bots():
+    raw = os.environ.get("BOTS_JSON", "").strip()
+    if raw:
+        return _bots_from_data(json.loads(raw))
+    try:
+        path = Path(__file__).resolve().parents[1] / "rulesets" / "bots.json"
+    except (RuntimeError, OSError, IndexError):
+        path = None
+    if path is not None and path.is_file():
+        return _bots_from_data(json.loads(path.read_text()))
+    data = fetch_bots_json_from_api()
+    if data is not None:
+        return _bots_from_data(data)
+    if not SYNCED_BOT_SLUGS:
+        fail("cannot load rulesets/bots.json and SYNCED_BOT_SLUGS is empty")
+    return list(SYNCED_BOT_SLUGS)
+
+
 def bot_agent_re(bots):
     alt = "|".join(re.escape(b) for b in bots)
     return re.compile(rf"^agent/({alt})/({TYPES_ALT})/{SLUG}$")
 
 
-def parse_cutoff(raw):
-    if not raw or not raw.strip():
-        return None
-    text = raw.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    return datetime.fromisoformat(text)
-
-
 def parse_pr_created_at(raw):
     if not raw or not raw.strip():
         return None
-    text = raw.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    return datetime.fromisoformat(text)
+    return parse_timestamp(raw, "PR created_at")
 
 
 def legacy_allowed_for_pr(legacy_cutoff, pr_created_at):
     """After cutoff, legacy branch names only for PRs opened before cutoff."""
-    if legacy_cutoff is None:
-        return True
     now = datetime.now(timezone.utc)
     if now < legacy_cutoff:
         return True
     created = parse_pr_created_at(pr_created_at)
     if created is None:
         return False
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
     return created < legacy_cutoff
 
 
@@ -188,7 +237,7 @@ def main():
         fail("BRANCH is empty")
     base = os.environ.get("BASE_BRANCHES", "main,dev,master")
     base_branches = [b.strip() for b in base.split(",") if b.strip()]
-    legacy_cutoff = parse_cutoff(os.environ.get("LEGACY_BRANCH_PR_CREATED_BEFORE", ""))
+    legacy_cutoff = effective_legacy_cutoff()
     pr_created_at = os.environ.get("PR_CREATED_AT", "")
     bots = load_bots()
     sys.exit(validate(branch, base_branches, bots, legacy_cutoff, pr_created_at))

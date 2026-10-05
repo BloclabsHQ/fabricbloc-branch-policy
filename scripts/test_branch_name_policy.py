@@ -39,6 +39,16 @@ class TestBranchNamePolicy(unittest.TestCase):
         for b in bots:
             self.assertNotIn(b, bnp.RESERVED_BOT_SLUGS)
 
+    def test_cloud_sessions_yaml_matches_bots_json(self):
+        import yaml
+
+        policy_path = ROOT / "domains" / "04-cursor" / "cloud-sessions.yaml"
+        data = yaml.safe_load(policy_path.read_text())
+        branch_name = data["launch"]["branch_name"]
+        bots = bnp.load_bot_slugs()
+        self.assertEqual(branch_name["bot_branch_regex"], bnp.bot_branch_regex_from_bots(bots))
+        self.assertEqual(branch_name["agent_re"], bnp.agent_re_combined(bots))
+
 
 if __name__ == "__main__":
     unittest.main()
