@@ -19,6 +19,7 @@ HYGIENE_WORKFLOWS = (
     "hygiene-ci-red",
     "hygiene-branch-prune",
     "hygiene-backlog-lint",
+    "hygiene-deploy-green-gate",
 )
 
 
@@ -68,6 +69,11 @@ class TestHygieneContract(unittest.TestCase):
         body = embedded("hygiene-ci-red")
         self.assertIsNotNone(body)
         self.assertEqual(body.rstrip("\n"), expected_embed("ci_red").rstrip("\n"))
+
+    def test_deploy_green_gate_embed_synced(self):
+        body = embedded("hygiene-deploy-green-gate")
+        self.assertIsNotNone(body)
+        self.assertEqual(body.rstrip("\n"), expected_embed("deploy_green_gate").rstrip("\n"))
 
     # --- C2 stale ---
 

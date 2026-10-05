@@ -76,13 +76,15 @@ class CloudSessionsPolicy(unittest.TestCase):
         self.assertEqual(ph["grandfather"]["branch_prefixes"], ["agent/autonomous/"])
 
     def test_branch_regex_matches_guard(self):
-        text = GUARD_WF.read_text()
-        m = re.search(r"AGENT_RE='(\^[^']+)'", text)
-        self.assertIsNotNone(m, "AGENT_RE not found in branch-name-guard.yml")
-        guard_re = m.group(1)
+        import sys
+
+        sys.path.insert(0, str(ROOT / "branch-name-guard"))
+        import guard_logic as gl  # noqa: WPS433
+
         policy_re = self.data["launch"]["branch_name"]["session_branch_regex"]
-        self.assertEqual(policy_re, guard_re)
-        guard_rx = re.compile(guard_re)
+        guard_legacy = gl.LEGACY_AGENT_RE.pattern
+        self.assertEqual(policy_re, guard_legacy)
+        guard_rx = gl.LEGACY_AGENT_RE
         policy_rx = re.compile(policy_re)
         samples = (
             "agent/session/docs/658-branch-identity-patterns",
@@ -91,6 +93,8 @@ class CloudSessionsPolicy(unittest.TestCase):
         for sample in samples:
             self.assertIsNotNone(guard_rx.match(sample), sample)
             self.assertIsNotNone(policy_rx.match(sample), sample)
+        bot_re = re.compile(self.data["launch"]["branch_name"]["bot_branch_regex"])
+        self.assertIsNotNone(bot_re.match("agent/warden/feat/scope-my-slug"))
 
 
 if __name__ == "__main__":

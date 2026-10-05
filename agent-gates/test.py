@@ -24,6 +24,8 @@ GITHUB_HOSTED_RUNNER_LABELS = frozenset({
 HEAD, BASE, OLD = "h" * 40, "b" * 40, "o" * 40
 REVIEWER_BOT = "fabricbloc-reviewer[bot]"
 REVIEWER_BOT_ID = 337673700
+VERDICT_BOT = "fabricbloc-verdict[bot]"
+VERDICT_BOT_ID = 337980250
 
 
 def validate_required_gate_hosted_only(name, doc):
@@ -69,7 +71,13 @@ def assert_required_gate_hosted_only():
 
 def embedded(name):
     doc = yaml.safe_load((WF / f"{name}.yml").read_text())
-    run = doc["jobs"][name]["steps"][0]["run"]
+    run = None
+    for step in doc["jobs"][name]["steps"]:
+        if isinstance(step.get("run"), str) and "<<'PY'" in step["run"]:
+            run = step["run"]
+            break
+    if run is None:
+        raise KeyError(f"no embedded PY step in {name}.yml")
     start = run.index("<<'PY'\n") + len("<<'PY'\n")
     return run[start:run.rindex("\nPY")]
 
@@ -269,6 +277,66 @@ def load_gate_constants():
     ns = {}
     exec(src.replace("\nmain()\n", "\n"), ns)  # noqa: S102
     return ns
+
+
+# canon-push-protected-paths patterns not mirrored in FLOOR_DENIED / FLOOR_PROVIDER_CONTROL.
+# Keep empty unless a pattern is intentionally gated only at push ruleset layer (document why).
+FLOOR_DENIED_CANON_EXCEPTIONS = ()
+
+
+def canon_push_protected_path_patterns(canon=None):
+    if canon is None:
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+    rs = next(
+        r
+        for r in canon["repository_rulesets"]
+        if r.get("_repository") == "fabricbloc" and r["name"] == "canon-push-protected-paths"
+    )
+    return rs["rules"][0]["parameters"]["restricted_file_paths"]
+
+
+def _canon_pattern_probe_paths(pattern):
+    p = (pattern or "").replace("\\", "/")
+    if p.endswith("/**/*"):
+        root = p[: -len("/**/*")]
+        probes = [f"{root}/__probe__", f"{root}/nested/__probe__"]
+    elif p.endswith("*"):
+        base = p[:-1]
+        probes = [base, base + "suffix"]
+    else:
+        probes = [p]
+    probes.append(probes[0].swapcase())
+    return probes
+
+
+def assert_canon_push_paths_covered_by_floor():
+    ns = load_gate_constants()
+    match_entry = ns["path_matches_denied_entry"]
+    match_glob = ns["path_matches_glob_ci"]
+    floor = list(ns["FLOOR_DENIED"]) + list(ns["FLOOR_PROVIDER_CONTROL"])
+    missing = []
+    for pattern in canon_push_protected_path_patterns():
+        if pattern in FLOOR_DENIED_CANON_EXCEPTIONS:
+            continue
+        covered = False
+        classify = ns["classify_agent_path_tier"]
+        for probe in _canon_pattern_probe_paths(pattern):
+            if not match_glob(probe, pattern):
+                continue
+            if any(match_entry(probe, entry) for entry in floor):
+                covered = True
+                break
+            if classify(probe, list(ns["FLOOR_DENIED"])) in ("cris_only", "verdict_eligible"):
+                covered = True
+                break
+        if not covered:
+            missing.append(pattern)
+    if missing:
+        raise AssertionError(
+            "canon-push-protected-paths pattern(s) not covered by FLOOR_DENIED or "
+            f"FLOOR_PROVIDER_CONTROL (add to embedded_gate.py or FLOOR_DENIED_CANON_EXCEPTIONS): "
+            + ", ".join(missing)
+        )
 
 
 def run_gate_with_patch(mode, patch_src, extra_env=None):
@@ -562,8 +630,8 @@ class T(unittest.TestCase):
 
         def patch(body):
             return body.replace(
-                "        if bad:\n            fail(f\"{len(bad)} denied path(s)\")",
-                "        if False and bad:\n            fail(f\"{len(bad)} denied path(s)\")",
+                "        if cris_only:\n            fail(f\"{len(cris_only)} Cris-only denied path(s)\")",
+                "        if False and cris_only:\n            fail(f\"{len(cris_only)} Cris-only denied path(s)\")",
                 1,
             )
 
@@ -694,6 +762,12 @@ class T(unittest.TestCase):
         setup(files=("docs/x.md",), reviews=[approve("randomuser")], **AGENT)
         self.assertEqual(run("agent-review-of-record")[0], 1)
 
+    def test_review_file_count_mismatch_fails_before_auto_approve(self):
+        setup(files=("docs/guide.md",), changed=99, reviews=[], **AGENT)
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+        self.assertIn("file count mismatch", out)
+
     def test_hostile_branch_name_is_inert(self):
         setup(ref='agent/x";$(touch /tmp/pwned);"', files=("docs/x.md",), atype="Bot", author="fabricbloc-agent-ops[bot]")
         run("agent-denied-paths")
@@ -744,6 +818,113 @@ class T(unittest.TestCase):
               engine_config=cfg, **AGENT)
         code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
+
+    def test_verdict_app_approve_never_qualifies_review_of_record(self):
+        ns = load_gate_constants()
+        review = {
+            "state": "APPROVED",
+            "commit_id": HEAD,
+            "user": {"login": VERDICT_BOT, "id": VERDICT_BOT_ID},
+            "body": reviewer_body(),
+        }
+        allow = {"Madgeniusblink", VERDICT_BOT}
+        self.assertFalse(
+            ns["approval_qualifies"](review, HEAD, allow, set(), ns["REVIEWER_APP_BOTS"])
+        )
+        cfg = (
+            f"human: ['Madgeniusblink']\n"
+            f"ai_reviewers: ['{VERDICT_BOT}']\n"
+        )
+        setup(
+            files=("docs/x.md",),
+            reviews=[approve(VERDICT_BOT, body=reviewer_body(), user_id=VERDICT_BOT_ID)],
+            engine_config=cfg,
+            **AGENT,
+        )
+        self.assertEqual(run("agent-review-of-record")[0], 1)
+
+    def test_humans_from_manifest_empty_floors_gov_handles(self):
+        ns = load_gate_constants()
+        self.assertEqual(
+            ns["humans_from_manifest"]({}),
+            set(ns["GOV_HUMAN_HANDLES"]),
+        )
+        self.assertEqual(
+            ns["humans_from_manifest"]({"operators": {"members_expected": []}}),
+            set(ns["GOV_HUMAN_HANDLES"]),
+        )
+
+    def test_review_of_record_allowlist_empty_manifest_includes_reviewer_bot(self):
+        ns = load_gate_constants()
+        humans = ns["humans_from_manifest"]({})
+        allow = ns["review_of_record_allowlist"](humans, None, ns["REVIEWER_APP_BOTS"])
+        self.assertIn(ns["GOV_HUMAN_HANDLES"][0], allow)
+        self.assertIn(REVIEWER_BOT, allow)
+
+    def test_review_of_record_allowlist_empty_inputs_stays_empty(self):
+        ns = load_gate_constants()
+        self.assertEqual(ns["review_of_record_allowlist"](set(), None, set()), set())
+
+    def test_context_empty_manifest_review_not_blocked_on_allowlist(self):
+        setup(
+            files=("docs/x.md",),
+            manifest={},
+            repo="BloclabsHQ/context",
+            reviews=[],
+            **AGENT,
+        )
+        code, out = run("agent-review-of-record", repo="BloclabsHQ/context")
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("no reviewer allowlist", out)
+
+    def test_gate_workflows_checks_write_permission(self):
+        denied = yaml.safe_load((WF / "agent-denied-paths.yml").read_text()).get("permissions") or {}
+        self.assertEqual(denied.get("checks"), "write")
+        ror_doc = yaml.safe_load((WF / "agent-review-of-record.yml").read_text())
+        gate_job = (ror_doc.get("jobs") or {}).get("agent-review-of-record") or {}
+        gate_perms = gate_job.get("permissions") or {}
+        self.assertEqual(gate_perms.get("checks"), "write")
+        mint_job = (ror_doc.get("jobs") or {}).get("reviewer-app-auto-approve") or {}
+        self.assertEqual(mint_job.get("environment"), "reviewer")
+        mint_perms = mint_job.get("permissions") or {}
+        self.assertEqual(mint_perms.get("issues"), "write")
+
+    def test_review_of_record_split_pull_request_and_target(self):
+        doc = yaml.safe_load((WF / "agent-review-of-record.yml").read_text())
+        on = doc.get("on") or doc.get(True) or {}
+        for key in ("pull_request", "pull_request_target"):
+            types = (on.get(key) or {}).get("types") or []
+            self.assertIn("edited", types, key)
+        gate = (doc.get("jobs") or {}).get("agent-review-of-record") or {}
+        self.assertNotIn("environment", gate)
+        gate_if = gate.get("if") or ""
+        self.assertIn("pull_request", gate_if)
+        mint = (doc.get("jobs") or {}).get("reviewer-app-auto-approve") or {}
+        self.assertEqual(mint.get("environment"), "reviewer")
+        mint_if = mint.get("if") or ""
+        self.assertIn("pull_request_target", mint_if)
+        gate_step = gate["steps"][0]
+        gate_env = gate_step.get("env") or {}
+        self.assertEqual(gate_env.get("ROR_JOB"), "gate")
+        self.assertNotIn("REVIEWER_APP_TOKEN", gate_env)
+        self.assertNotIn("REVIEWER_APP_PRIVATE_KEY", gate_env)
+        self.assertNotIn("secrets.", str(gate_step))
+        mint_run = [s for s in mint["steps"] if s.get("env", {}).get("ROR_JOB") == "mint"][0]
+        self.assertIn("REVIEWER_APP_TOKEN", mint_run["env"])
+
+    def test_reviewer_env_docs_forbid_refs_pull_deployment_rules(self):
+        text = (ROOT / "docs" / "REVIEWER-IDENTITY.md").read_text()
+        low = text.lower()
+        self.assertIn("refs/pull", text)
+        self.assertTrue(
+            "refs/pull" in text
+            and (
+                "may not match" in low
+                or "must not match" in low
+                or "no environment deployment rule may match" in low
+            ),
+            "docs must forbid refs/pull/* deployment rules",
+        )
 
     def test_reviewer_app_approval_at_head_valid_body_passes(self):
         cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
@@ -864,6 +1045,15 @@ class T(unittest.TestCase):
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         self.assertEqual(gates.get("bypass_actors"), [])
 
+    def test_canon_agent_gates_pull_request_review_count(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
+        pr_rules = [r for r in gates.get("rules") or [] if r.get("type") == "pull_request"]
+        self.assertEqual(len(pr_rules), 1, pr_rules)
+        params = pr_rules[0]["parameters"]
+        self.assertEqual(params.get("required_approving_review_count"), 1)
+        self.assertNotIn("allowed_merge_methods", params)
+
     def test_canon_agent_gates_live_ref_include(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
@@ -895,12 +1085,75 @@ class T(unittest.TestCase):
         expected = {r.split("/", 1)[1] for r in load_gate_constants()["TARGET_REPOS"]}
         self.assertEqual(short, expected)
 
-    def test_canon_push_protected_paths_covers_workflows(self):
+    def test_canon_wallet_green_ci_contract(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
-        rs = next(r for r in canon["repository_rulesets"]
-                  if r.get("_repository") == "fabricbloc" and r["name"] == "canon-push-protected-paths")
-        paths = rs["rules"][0]["parameters"]["restricted_file_paths"]
-        self.assertIn(".github/workflows/**/*", paths)
+        rs = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-wallet-green-ci")
+        self.assertNotIn("_founder_decision", rs)
+        self.assertIn("_apply_after", rs)
+        self.assertEqual(rs.get("bypass_actors"), [])
+        self.assertEqual(
+            rs["conditions"]["repository_name"]["include"],
+            ["fabric-wallet"],
+        )
+        self.assertEqual(
+            rs["conditions"]["ref_name"]["include"],
+            ["refs/heads/dev", "refs/heads/main"],
+        )
+        pr_rule = next(r for r in rs["rules"] if r["type"] == "pull_request")
+        self.assertEqual(pr_rule["parameters"]["required_approving_review_count"], 0)
+        checks_rule = next(r for r in rs["rules"] if r["type"] == "required_status_checks")
+        params = checks_rule["parameters"]
+        self.assertTrue(params["strict_required_status_checks_policy"])
+        contexts = [c["context"] for c in params["required_status_checks"]]
+        self.assertEqual(contexts, ["Lint", "Security Scan", "Test", "Migration Checksum"])
+        for entry in params["required_status_checks"]:
+            self.assertEqual(entry["integration_id"], 15368)
+
+    def test_decisions_wallet_green_ci_yes(self):
+        text = (ROOT / "DECISIONS.md").read_text()
+        self.assertRegex(text, r"\*\*WALLET-GREEN-CI:\*\*.*\*\*\[Yes\]\*\*", re.S)
+
+    def test_canon_push_protected_paths_covered_by_floor_denied(self):
+        assert_canon_push_paths_covered_by_floor()
+
+    def test_agent_denied_repair_decision_script(self):
+        setup(files=("scripts/repair-decision-probe.py",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("denied path", out)
+
+    def test_agent_denied_repair_decision_rename_old_path(self):
+        setup(
+            renames=[("scripts/repair-decision-old.py", "scripts/other.py")],
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("denied path", out)
+
+    def test_verdict_eligible_adr_passes_denied_paths(self):
+        setup(files=("architecture/decisions/ARCH-0045.md",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Verdict-eligible", out)
+
+    def test_verdict_eligible_engine_test_md_passes(self):
+        setup(
+            files=(
+                "agents/runtime/engine/tests/test_policy.py",
+                "agents/runtime/engine/README.md",
+            ),
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Verdict-eligible", out)
+
+    def test_engine_py_outside_tests_still_cris_only(self):
+        setup(files=("agents/runtime/engine/runner.py",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("Cris-only", out)
 
     def test_context_creation_restricted_shape(self):
         assert_creation_restricted_shape(load_canon(), repository="context")
@@ -939,7 +1192,10 @@ class T(unittest.TestCase):
         for name in GATES:
             doc = yaml.safe_load((WF / f"{name}.yml").read_text())
             pr_on = doc.get("on") or doc.get(True) or {}
-            pr = pr_on.get("pull_request") if isinstance(pr_on, dict) else None
+            if name == "agent-review-of-record":
+                pr = pr_on.get("pull_request_target") if isinstance(pr_on, dict) else None
+            else:
+                pr = pr_on.get("pull_request") if isinstance(pr_on, dict) else None
             types = pr.get("types") if isinstance(pr, dict) else None
             self.assertIsNotNone(types, name)
             self.assertIn("edited", types, name)

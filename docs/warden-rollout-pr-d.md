@@ -3,9 +3,9 @@
 ## In scope (this PR)
 
 - **`canon-agent-gates`:** add **fabric-wallet**, add required workflow **`gate-issue-link.yml`**, re-pin workflow SHAs together after PR-A–C merge.
-- **Not in scope:** org `pull_request` **`required_approving_review_count: 1`** — contradicts **GOV-0033 D1 (0)** and is **not approved**. See **`docs/PR-D2-gov-0033-d1-amendment.md`** (needs Cris yes).
+- **PR-D2 merged on main:** org **`pull_request`** **`required_approving_review_count: 1`** on **`canon-agent-gates`** (Cris yes 2026-10-04). Agent PRs satisfy via **fabricbloc-reviewer** App; human GOV-0022 PRs use normal human APPROVE. See **`docs/PR-D2-gov-0033-d1-amendment.md`**.
 
-Agent PR approval at head remains **`agent-review-of-record`** + **fabricbloc-reviewer** App (PR-C), not a ruleset review-count rule (avoids binding human GOV-0022 PRs).
+Agent PR approval at head remains **`agent-review-of-record`** + **fabricbloc-reviewer** App (PR-C), in addition to the org review count.
 
 ## Composition with open #47 (`canon-wallet-green-ci`)
 
@@ -18,12 +18,10 @@ No conflict: agent gates target default-branch family refs; wallet green CI adds
 
 ## Apply order (MadAgentPM)
 
-1. Merge **PR-A → PR-B → PR-C** (or stack re-pin branch).
-2. Single **re-pin** PR: set `pins.agent_gates_sha` and all `canon-agent-gates` `workflows[].sha` to that squash SHA.
-3. Apply org ruleset **24445414** + set `ISSUE_LINK_ENFORCE_AFTER`, **`LEGACY_BRANCH_PR_CREATED_BEFORE`**, reviewer App secrets.
-4. Merge **#47** separately when ready; apply `WALLET-GREEN-CI` org ruleset.
-
-Until step 2, PR-D canon pins remain at **`1ddbd5b`** (pre-stack); do not apply gate-issue-link SHA until the file exists on `main`.
+1. Merge **#51** (this PR) to `main`.
+2. **Re-pin** `pins.agent_gates_sha` and all `canon-agent-gates` `workflows[].sha` to the **#51 squash SHA** on `main` (must include **`fabric-wallet`** in `TARGET_REPOS` and **`gate-issue-link.yml`** at that SHA — live **`ed19bdd`** alone is insufficient for wallet). Batch with any **#59** SHA per Madgeniusblink hold note.
+3. Org-owner apply ruleset **24445414** from updated canon.
+4. **#47 / WALLET-GREEN-CI** applied (**24489464**); no longer blocked on this PR.
 
 ## Operational FYI (2026-10-05)
 
