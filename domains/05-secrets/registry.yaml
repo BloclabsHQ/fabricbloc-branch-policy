@@ -432,14 +432,24 @@ entries:
     kind: app
     stored_as: variable
     github:
-      - scope: repo
+      - scope: environment
         repos:
-          - BloclabsHQ/fabricbloc-branch-policy
-        environment: null
+          - BloclabsHQ/fabricbloc
+        environment: reviewer
+        visibility: null
+      - scope: environment
+        repos:
+          - BloclabsHQ/context
+        environment: reviewer
+        visibility: null
+      - scope: environment
+        repos:
+          - BloclabsHQ/keyflo-session-issuer
+        environment: reviewer
         visibility: null
     onepassword_item: "fabricbloc-reviewer / fabricbloc-reviewer App client id"
     runtime_env: null
-    permissions: "GitHub App 5185203; bot user 337673700"
+    permissions: "GitHub App 5185203; bot 337673700; Option B: Actions env reviewer per gated repo; deployment branch main only; no refs/pull/*; not repo/org/box"
     owner_role: warden
     custodian: cris
     rotation_days: 180
@@ -454,14 +464,24 @@ entries:
     kind: app
     stored_as: secret
     github:
-      - scope: repo
+      - scope: environment
         repos:
-          - BloclabsHQ/fabricbloc-branch-policy
-        environment: null
+          - BloclabsHQ/fabricbloc
+        environment: reviewer
+        visibility: null
+      - scope: environment
+        repos:
+          - BloclabsHQ/context
+        environment: reviewer
+        visibility: null
+      - scope: environment
+        repos:
+          - BloclabsHQ/keyflo-session-issuer
+        environment: reviewer
         visibility: null
     onepassword_item: "vault:fabricbloc-reviewer (Cris-only; source of truth)"
     runtime_env: null
-    permissions: "contents read, metadata read, pull_requests write; Actions copy only after canon-push-protected (option B)"
+    permissions: "contents read, metadata read, pull_requests write; Option B: same reviewer env per TARGET_REPOS; main-only deployment; never branch-policy repo-level or box"
     owner_role: warden
     custodian: cris
     rotation_days: 180
@@ -476,13 +496,13 @@ entries:
     kind: app
     stored_as: variable
     github:
-      - scope: org
+      - scope: box
         repos: null
         environment: null
         visibility: null
     onepassword_item: null
     runtime_env: null
-    permissions: "GitHub App 5193724 fabricbloc-verdict; bot 337980250; installation 168044795"
+    permissions: "GitHub App 5193724 fabricbloc-verdict; bot 337980250; installation 168044795; box-only (reviewer bots); no Actions or org secret home"
     owner_role: warden
     custodian: null
     rotation_days: null
@@ -497,13 +517,13 @@ entries:
     kind: app
     stored_as: secret
     github:
-      - scope: org
+      - scope: box
         repos: null
         environment: null
         visibility: null
     onepassword_item: "UV pending (add 1P item per GOV-0034)"
     runtime_env: FABRICBLOC_VERDICT_PRIVATE_KEY
-    permissions: "issues+PR write (verdict marker); box reviewer bots only; not Actions"
+    permissions: "issues+PR write (verdict marker); box reviewer bots only; no Actions/org secret home"
     owner_role: warden
     custodian: cris
     rotation_days: 180
@@ -518,13 +538,13 @@ entries:
     kind: app
     stored_as: runtime_env
     github:
-      - scope: org
+      - scope: box
         repos: null
         environment: null
         visibility: null
     onepassword_item: "UV pending (canonical registry name VERDICT_APP_PRIVATE_KEY)"
     runtime_env: FABRICBLOC_VERDICT_PRIVATE_KEY
-    permissions: "runtime alias for VERDICT_APP_PRIVATE_KEY on agent box (Grok Bot scoped secrets)"
+    permissions: "runtime alias for VERDICT_APP_PRIVATE_KEY on reviewer-bot boxes only (Grok Bot scoped secrets); not Actions/org"
     owner_role: warden
     custodian: cris
     rotation_days: 180

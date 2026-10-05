@@ -35,7 +35,7 @@ Verify: `make validate`.
 
 | Field | Type |
 |---|---|
-| `scope` | `org`, `repo`, or `environment` |
+| `scope` | `org`, `repo`, `environment`, or `box` (no GitHub secret/variable home) |
 | `repos` | string[] \| null (required for `repo` scope) |
 | `environment` | string \| null (for `environment` scope) |
 | `visibility` | `all`, `private`, or null |

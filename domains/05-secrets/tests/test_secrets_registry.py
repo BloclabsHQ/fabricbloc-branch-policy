@@ -126,6 +126,27 @@ class SecretsRegistryB0(unittest.TestCase):
             self.assertIn(name, self.by_name)
         self.assertNotIn("AGENT_OPS_APP_PRIVATE_KEY", self.by_name)
 
+    def test_reviewer_app_option_b_environment_per_target_repo(self):
+        expected_repos = {
+            "BloclabsHQ/fabricbloc",
+            "BloclabsHQ/context",
+            "BloclabsHQ/keyflo-session-issuer",
+        }
+        for name in ("REVIEWER_APP_CLIENT_ID", "REVIEWER_APP_PRIVATE_KEY"):
+            locs = self.by_name[name]["github"]
+            self.assertEqual(len(locs), 3)
+            repos_found = {loc["repos"][0] for loc in locs}
+            self.assertEqual(repos_found, expected_repos)
+            for loc in locs:
+                self.assertEqual(loc["scope"], "environment")
+                self.assertEqual(loc["environment"], "reviewer")
+            self.assertNotIn("fabricbloc-branch-policy", repos_found)
+
+    def test_verdict_app_box_only_not_org_or_actions(self):
+        for name in ("VERDICT_APP_ID", "VERDICT_APP_PRIVATE_KEY", "FABRICBLOC_VERDICT_PRIVATE_KEY"):
+            scopes = {loc["scope"] for loc in self.by_name[name]["github"]}
+            self.assertEqual(scopes, {"box"})
+
 
 if __name__ == "__main__":
     unittest.main()
