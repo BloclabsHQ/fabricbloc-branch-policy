@@ -277,6 +277,62 @@ def load_gate_constants():
     return ns
 
 
+# canon-push-protected-paths patterns not mirrored in FLOOR_DENIED / FLOOR_PROVIDER_CONTROL.
+# Keep empty unless a pattern is intentionally gated only at push ruleset layer (document why).
+FLOOR_DENIED_CANON_EXCEPTIONS = ()
+
+
+def canon_push_protected_path_patterns(canon=None):
+    if canon is None:
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+    rs = next(
+        r
+        for r in canon["repository_rulesets"]
+        if r.get("_repository") == "fabricbloc" and r["name"] == "canon-push-protected-paths"
+    )
+    return rs["rules"][0]["parameters"]["restricted_file_paths"]
+
+
+def _canon_pattern_probe_paths(pattern):
+    p = (pattern or "").replace("\\", "/")
+    if p.endswith("/**/*"):
+        root = p[: -len("/**/*")]
+        probes = [f"{root}/__probe__", f"{root}/nested/__probe__"]
+    elif p.endswith("*"):
+        base = p[:-1]
+        probes = [base, base + "suffix"]
+    else:
+        probes = [p]
+    probes.append(probes[0].swapcase())
+    return probes
+
+
+def assert_canon_push_paths_covered_by_floor():
+    ns = load_gate_constants()
+    match_entry = ns["path_matches_denied_entry"]
+    match_glob = ns["path_matches_glob_ci"]
+    floor = list(ns["FLOOR_DENIED"]) + list(ns["FLOOR_PROVIDER_CONTROL"])
+    missing = []
+    for pattern in canon_push_protected_path_patterns():
+        if pattern in FLOOR_DENIED_CANON_EXCEPTIONS:
+            continue
+        covered = False
+        for probe in _canon_pattern_probe_paths(pattern):
+            if not match_glob(probe, pattern):
+                continue
+            if any(match_entry(probe, entry) for entry in floor):
+                covered = True
+                break
+        if not covered:
+            missing.append(pattern)
+    if missing:
+        raise AssertionError(
+            "canon-push-protected-paths pattern(s) not covered by FLOOR_DENIED or "
+            f"FLOOR_PROVIDER_CONTROL (add to embedded_gate.py or FLOOR_DENIED_CANON_EXCEPTIONS): "
+            + ", ".join(missing)
+        )
+
+
 def run_gate_with_patch(mode, patch_src, extra_env=None):
     body = patch_src(embedded(mode))
     env = dict(
@@ -915,12 +971,23 @@ class T(unittest.TestCase):
         expected = {r.split("/", 1)[1] for r in load_gate_constants()["TARGET_REPOS"]}
         self.assertEqual(short, expected)
 
-    def test_canon_push_protected_paths_covers_workflows(self):
-        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
-        rs = next(r for r in canon["repository_rulesets"]
-                  if r.get("_repository") == "fabricbloc" and r["name"] == "canon-push-protected-paths")
-        paths = rs["rules"][0]["parameters"]["restricted_file_paths"]
-        self.assertIn(".github/workflows/**/*", paths)
+    def test_canon_push_protected_paths_covered_by_floor_denied(self):
+        assert_canon_push_paths_covered_by_floor()
+
+    def test_agent_denied_repair_decision_script(self):
+        setup(files=("scripts/repair-decision-probe.py",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("denied path", out)
+
+    def test_agent_denied_repair_decision_rename_old_path(self):
+        setup(
+            renames=[("scripts/repair-decision-old.py", "scripts/other.py")],
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("denied path", out)
 
     def test_context_creation_restricted_shape(self):
         assert_creation_restricted_shape(load_canon(), repository="context")

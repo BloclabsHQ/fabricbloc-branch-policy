@@ -19,6 +19,12 @@ FLOOR_DENIED = [
     "agents/runtime/engine/", "agents/agents.yaml", ".github/workflows/",
     ".github/actions/", "decisions/", "architecture/decisions/",
     "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS",
+    ".gitmodules",
+    "scripts/github-check.sh",
+    "scripts/branch-name-policy*",
+    "scripts/repair-decision*",
+    "scripts/canon-entry-budget.py",
+    "scripts/x64-toolchain-inventory.json",
 ]
 # Q9 provider control surfaces (AG-04): warn-first; hard-fail via PROVIDER_CONTROL_ENFORCE=fail (see DECISIONS F6-D7).
 FLOOR_PROVIDER_CONTROL = [".cursor/", ".claude/"]
@@ -524,6 +530,9 @@ def path_matches_denied_entry(path, entry):
     e = normalize_repo_path(entry)
     if e.endswith("/"):
         return norm.startswith(e) or norm == e.rstrip("/")
+    if e.endswith("*"):
+        prefix = e[:-1]
+        return norm == prefix or norm.startswith(prefix)
     return norm == e or norm.startswith(e + "/")
 
 
@@ -908,9 +917,6 @@ def main():
         if INCLUDE_PROPOSED:
             denied += list(dp.get("proposed_additions") or [])
 
-        def hit(p, e):
-            return p.startswith(e) if e.endswith("/") else (p == e or p.startswith(e))
-
         if PROJECTION_ENFORCE not in ("warn", "fail"):
             fail(f"PROJECTION_ENFORCE must be 'warn' or 'fail', got {PROJECTION_ENFORCE!r}")
         if PROVIDER_CONTROL_ENFORCE not in ("warn", "fail"):
@@ -925,7 +931,7 @@ def main():
                 f"::warning file={path}::no diff patch (binary or too large); "
                 "AG-05 cannot scan added lines"
             )
-            if PROJECTION_ENFORCE == "fail" and any(hit(path, e) for e in denied):
+            if PROJECTION_ENFORCE == "fail" and path_matches_denied(path, denied):
                 missing_patch_denied.append(path)
         if missing_patch_denied:
             for p in sorted(missing_patch_denied):
@@ -935,13 +941,15 @@ def main():
                 )
             fail(f"{len(missing_patch_denied)} denied path(s) without diff patch")
 
-        bad = sorted({p for p in paths for e in denied if hit(p, e)})
+        bad = sorted(p for p in paths if path_matches_denied(p, denied))
         for p in bad:
             print(f"::error file={p}::denied path for agent PRs (ARCH-0048 decision 5 / AG-04)")
         if bad:
             fail(f"{len(bad)} denied path(s)")
 
-        provider_hits = sorted({p for p in paths for e in FLOOR_PROVIDER_CONTROL if hit(p, e)})
+        provider_hits = sorted(
+            p for p in paths if path_matches_denied(p, FLOOR_PROVIDER_CONTROL)
+        )
         for p in provider_hits:
             line = (
                 f"::error file={p}::provider control path for agent PRs (AG-04 / Q9)"
