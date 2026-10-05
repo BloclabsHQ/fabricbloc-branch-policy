@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 ROOT = __import__("pathlib").Path(__file__).resolve().parent
+POLICY_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 
 import gate_issue_link as gil  # noqa: E402
@@ -46,6 +47,29 @@ class TestParseIssueRefs(unittest.TestCase):
         body = "Fixes https://github.com/BloclabsHQ/fabricbloc/issues/1526"
         refs = gil.parse_issue_refs(body, "BloclabsHQ/fabric-wallet")
         self.assertEqual(refs, [("BloclabsHQ/fabricbloc", 1526)])
+
+
+class TestCanonParity(unittest.TestCase):
+    def test_embedded_enforce_deadline_matches_canon_json(self):
+        canon_path = POLICY_ROOT / "rulesets" / "canon.json"
+        canon = json.loads(canon_path.read_text())
+        self.assertEqual(
+            gil.CANON_ISSUE_LINK_ENFORCE_AFTER,
+            canon["pins"]["issue_link_enforce_after"],
+        )
+
+
+class TestWorkflowContract(unittest.TestCase):
+    def test_app_token_action_pinned_and_client_id(self):
+        wf = (POLICY_ROOT / ".github/workflows/gate-issue-link.yml").read_text()
+        self.assertIn(
+            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0",
+            wf,
+        )
+        self.assertIn("client-id: ${{ vars.HYGIENE_APP_CLIENT_ID }}", wf)
+        self.assertNotIn("create-github-app-token@v1", wf)
+        self.assertIn("permission-issues: read", wf)
+        self.assertIn("HYGIENE_APP_PRIVATE_KEY missing", wf)
 
 
 class TestEnforceMode(unittest.TestCase):

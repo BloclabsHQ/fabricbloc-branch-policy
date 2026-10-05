@@ -24,14 +24,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - name: Detect hygiene App credentials for cross-repo issues
+        id: issue_link_app_ready
+        env:
+          HYGIENE_APP_CLIENT_ID: ${{ vars.HYGIENE_APP_CLIENT_ID }}
+          HYGIENE_APP_PRIVATE_KEY: ${{ secrets.HYGIENE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$HYGIENE_APP_CLIENT_ID" ] && [ -n "$HYGIENE_APP_PRIVATE_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            if [ -n "$HYGIENE_APP_CLIENT_ID" ]; then
+              echo "::notice title=gate-issue-link::HYGIENE_APP_CLIENT_ID set but HYGIENE_APP_PRIVATE_KEY missing; skipping cross-repo App token (no fail)."
+            fi
+          fi
       - name: Mint org App token for cross-repo issue reads
         id: issue_link_app
-        if: vars.HYGIENE_APP_CLIENT_ID != ''
-        uses: actions/create-github-app-token@v1
+        if: steps.issue_link_app_ready.outputs.ready == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.HYGIENE_APP_CLIENT_ID }}
+          client-id: ${{ vars.HYGIENE_APP_CLIENT_ID }}
           private-key: ${{ secrets.HYGIENE_APP_PRIVATE_KEY }}
           owner: BloclabsHQ
+          permission-issues: read
       - name: Require linked open issue
         env:
           MODE: gate-issue-link

@@ -19,8 +19,10 @@
     "agent_gates_sha": "1ddbd5bc04e4d7afa69be602aceede299774624d",
     "branch_name_guard_sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25",
     "hygiene_sha": "1ddbd5bc04e4d7afa69be602aceede299774624d",
-    "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit. issue_link_enforce_after: warn-only until this UTC instant; set repo/org var ISSUE_LINK_ENFORCE_AFTER to match before apply.",
-    "issue_link_enforce_after": "2026-10-07T03:00:00Z"
+    "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit. issue_link_enforce_after: warn-only until this UTC instant; set org/repo var ISSUE_LINK_ENFORCE_AFTER to match before apply (var may only move earlier).",
+    "issue_link_enforce_after": "2026-10-07T03:00:00Z",
+    "legacy_branch_pr_created_before": "2026-10-19T00:00:00Z",
+    "_legacy_branch_note": "PRs with created_at before this instant may use agent/(session|autonomous)/... after dual-accept ends. Set org/repo var LEGACY_BRANCH_PR_CREATED_BEFORE to match. Ineffective until all branch producers emit agent/<bot>/... (cannot fire early)."
   },
   "organization_rulesets": [
     {
@@ -52,6 +54,7 @@
       },
       "bypass_actors": [],
       "_bypass_note": "Empty on purpose (decision F6-D2). No standing bypass on canon-agent-gates: break-glass is an org owner sets enforcement to Disabled (org audit log); fabricbloc cursor-env drift opens an issue while disabled. The gates pass at once for GOV-0022 human PRs to main, so nobody needs a bypass. An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
+      "_pull_request_note": "GOV-0033 D1 amended (PR-D2, Cris 2026-10-04 7:56 PM PT): one GitHub approving review on merge bases in ref_name.include. GitHub org rulesets cannot scope review count to agent head refs only — see docs/PR-D2-gov-0033-d1-amendment.md. Agent PRs: satisfied by fabricbloc-reviewer App (337673700) after PR-C verdict + agent-review-of-record. Human GOV-0022 PRs: gates skip (F6-D2/D3); any eligible human APPROVE satisfies the org count (not Cris-only). Repo rulesets (main-required-ci, etc.) keep required_approving_review_count: 0 on their pull_request blocks; org + repo rules aggregate on the same base ref.",
       "rules": [
         {
           "type": "workflows",
@@ -71,6 +74,16 @@
                 "sha": "1ddbd5bc04e4d7afa69be602aceede299774624d"
               }
             ]
+          }
+        },
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 1,
+            "dismiss_stale_reviews_on_push": true,
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": false
           }
         }
       ]

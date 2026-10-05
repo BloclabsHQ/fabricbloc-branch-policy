@@ -2,16 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-workflow="$root/.github/workflows/branch-name-guard.yml"
-validator="$(mktemp)"
-trap 'rm -f "$validator"' EXIT
-
-ruby -ryaml -e '
-  workflow = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
-  script = workflow.dig("jobs", "guard", "steps", 0, "run")
-  abort "branch-name-guard: validator run block not found" unless script
-  puts script
-' "$workflow" > "$validator"
+export PYTHONPATH="$root/branch-name-guard${PYTHONPATH:+:$PYTHONPATH}"
 
 run_case() {
   local expected="$1"
@@ -19,7 +10,13 @@ run_case() {
   local output status
 
   set +e
-  output="$(BRANCH="$branch" BASE_BRANCHES="main,dev,master" bash "$validator" 2>&1)"
+  output="$(
+    BRANCH="$branch" BASE_BRANCHES="main,dev,master" \
+      LEGACY_BRANCH_PR_CREATED_BEFORE="2099-01-01T00:00:00Z" \
+      PR_CREATED_AT="2026-10-01T00:00:00Z" \
+      REPO="" GH_TOKEN="" \
+      python3 "$root/branch-name-guard/guard_logic.py" 2>&1
+  )"
   status=$?
   set -e
 
@@ -38,6 +35,7 @@ accepted=(
   "debu99/feat/identity-alignment"
   "agent/session/docs/658-branch-identity-patterns"
   "agent/autonomous/ci/fleet-branch-guard"
+  "agent/warden/feat/warden-my-feature"
 )
 
 rejected=(
@@ -58,5 +56,6 @@ for branch in "${rejected[@]}"; do
   run_case fail "$branch"
 done
 
+python3 "$root/branch-name-guard/test_guard_logic.py" -q
 printf 'branch-name-guard contract: %d accepted, %d rejected\n' \
   "${#accepted[@]}" "${#rejected[@]}"
