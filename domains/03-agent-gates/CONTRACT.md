@@ -9,3 +9,5 @@ OUT: `agent-denied-paths` and `agent-review-of-record` @ pinned SHA in `rulesets
 GATE: Re-pin org `canon-agent-gates` after every gate change (P3).
 
 Verify: `python3 agent-gates/test.py`.
+
+Funds/custody human gate → **FC-01** (`domains/06-funds-custody/`).
