@@ -1,6 +1,6 @@
 # Reviewer routing and App auto-approve (PR-C)
 
-Canon: `rulesets/reviewers.json` loaded from `fabricbloc-branch-policy` at **`pins.agent_gates_sha`** (never the PR head). See `docs/REVIEWER-IDENTITY.md`.
+Canon: `rulesets/reviewers.json` loaded from `fabricbloc-branch-policy` at **`pins.agent_gates_sha`** (never the PR head). See `docs/REVIEWER-IDENTITY.md`. **Bots never count as reviewers** except **`fabricbloc-reviewer[bot]`** / **337673700** or a non-author human (`DECISIONS.md` **14**, `docs/GOV-bots-never-count-as-reviewers.md`).
 
 ## Auto-approve
 

@@ -1,5 +1,15 @@
 # Reviewer identity (distinct from agent authors)
 
+## Bots never count as reviewers (GOV, 2026-10-05)
+
+**Council-delegated founder decision** (MadTechBot → Cris, **2026-10-05**; `DECISIONS.md` item **14**, `docs/GOV-bots-never-count-as-reviewers.md`):
+
+- **Fleet bot logins never satisfy independent review** — including engine **`ai_reviewers`**, generic `*[bot]` accounts, and automation that posts **`APPROVE`** under shared operator login **`madgeniusblink`**. Those are agent-side automation, not a human or designated review App.
+- **Review-of-record** is only **`fabricbloc-reviewer[bot]`** with GitHub user id **337673700** (login + id pinned together in gate allowlists) **or** a **non-author human** `User` review.
+- **Cris-only** GitHub **environment** gates must use a **human-only** required reviewer (or Cris Slack id **U083ZJDP9EC**), **never** **`madgeniusblink`** alone.
+
+Policy prose here and in `DECISIONS.md` **supersedes F6-D10’s `ai_reviewers` may-approve clause** until a follow-up PR changes pinned gate code and re-pins org workflows. **Option B** split workflow, verdict App, and environment **`reviewer`** custody below are unchanged.
+
 ## Problem
 
 Agent PRs are authored by **`cursoragent`** (and related agent identities). Any verdict or approval path that trusts the same logins lets an agent **PASS its own PR**. Review-of-record must come from an identity that cannot be the PR author or a commit participant.
