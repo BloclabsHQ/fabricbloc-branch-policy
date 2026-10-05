@@ -539,15 +539,56 @@ jobs:
               return policy_repo_file(REVIEWERS_JSON, ref)
 
 
+          def normalize_repo_path(path):
+              return (path or "").replace("\\", "/").lower()
+
+
           def path_matches_glob(path, pattern):
               if "**" in pattern:
-                  parts = pattern.split("**")
                   if pattern.startswith("**/"):
                       return fnmatch.fnmatch(path, pattern[3:]) or fnmatch.fnmatch(
                           path, pattern.replace("**/", "*/", 1)
                       )
                   return fnmatch.fnmatch(path, pattern.replace("**", "*"))
               return fnmatch.fnmatch(path, pattern)
+
+
+          def path_matches_glob_ci(path, pattern):
+              return path_matches_glob(normalize_repo_path(path), normalize_repo_path(pattern))
+
+
+          def changed_paths_from_files(files):
+              paths = set()
+              for f in files:
+                  name = f.get("filename")
+                  if name:
+                      paths.add(name)
+                  prev = f.get("previous_filename")
+                  if prev:
+                      paths.add(prev)
+              return paths
+
+
+          def path_on_auto_approve_allowlist(path, cfg):
+              allow = cfg.get("deterministic_auto_approve_allowlist") or []
+              if not allow:
+                  return False
+              return any(path_matches_glob_ci(path, g) for g in allow)
+
+
+          def all_paths_allowlisted_for_auto(paths, cfg):
+              if not paths:
+                  return False
+              return all(path_on_auto_approve_allowlist(p, cfg) for p in paths)
+
+
+          def deterministic_auto_approve_eligible(paths, cfg, head):
+              if not all_paths_allowlisted_for_auto(paths, cfg):
+                  return False
+              _rev, cris, _sens, _matched = classify_review_routes(REPO, paths, cfg)
+              if cris:
+                  return False
+              return agent_denied_paths_successful(head)
 
 
           def classify_review_routes(repo_full, paths, cfg):
@@ -568,7 +609,7 @@ jobs:
                   prio = int(route.get("priority") or 0)
                   route_hit = False
                   for p in paths:
-                      if any(path_matches_glob(p, g) for g in globs):
+                      if any(path_matches_glob_ci(p, g) for g in globs):
                           route_hit = True
                           break
                   if not route_hit:
@@ -705,12 +746,7 @@ jobs:
                   )
                   fail("cris_required path class; App auto-approve blocked")
               app_token = os.environ.get("REVIEWER_APP_TOKEN", "").strip()
-              deterministic = (
-                  reviewer == default
-                  and not sensitive
-                  and not cris
-                  and agent_denied_paths_successful(head)
-              )
+              deterministic = deterministic_auto_approve_eligible(paths, cfg, head)
               if deterministic and app_token:
                   submit_reviewer_app_approve(number, head, app_token, reviewer)
                   print(f"{MODE}: App APPROVE (deterministic: gates green, default route `{reviewer}`)")
@@ -917,7 +953,7 @@ jobs:
                   if changed_n > MAX_FILES:
                       fail(f"PR changes {changed_n} files (> {MAX_FILES}); cannot list them all")
                   files = paginate(f"/repos/{REPO}/pulls/{number}/files", MAX_FILES)
-                  paths = {f["filename"] for f in files}
+                  paths = changed_paths_from_files(files)
                   cfg = load_reviewers_config()
                   excluded_logins = set(excluded)
                   if author:

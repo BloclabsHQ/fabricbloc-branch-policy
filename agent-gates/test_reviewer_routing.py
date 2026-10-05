@@ -10,8 +10,11 @@ sys.path.insert(0, str(ROOT))
 from embedded_gate import (  # noqa: E402
     VERDICT_RE,
     agent_denied_paths_successful,
+    all_paths_allowlisted_for_auto,
     body_without_code_fences,
+    changed_paths_from_files,
     classify_review_routes,
+    deterministic_auto_approve_eligible,
     issue_comment_edited,
     is_trusted_verdict_author,
     parse_verdict_from_comments,
@@ -204,6 +207,83 @@ class TestReviewerRouting(unittest.TestCase):
         self.assertTrue(any("needs-review" in p for p in posts))
 
 
+class TestDeterministicAutoApproveAllowlist(unittest.TestCase):
+    def test_changed_paths_includes_previous_filename(self):
+        files = [{"filename": "docs/x.md", "previous_filename": "src/auth/y.go"}]
+        self.assertEqual(
+            changed_paths_from_files(files),
+            {"docs/x.md", "src/auth/y.go"},
+        )
+
+    def test_rename_out_of_sensitive_dir_blocks_auto(self):
+        paths = {"docs/relocated.md", "src/auth/legacy.go"}
+        self.assertFalse(all_paths_allowlisted_for_auto(paths, CFG))
+
+    def test_case_variant_sensitive_path_denied(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"Src/Auth/handler.go"}, CFG))
+
+    def test_unlisted_path_makefile_denied(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"Makefile"}, CFG))
+
+    def test_allowlisted_docs_only_passes(self):
+        self.assertTrue(all_paths_allowlisted_for_auto({"docs/guide.md"}, CFG))
+
+    def test_sensitive_class_secrets(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"secrets/registry.yaml"}, CFG))
+
+    def test_sensitive_class_pem_key(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"certs/server.pem"}, CFG))
+
+    def test_sensitive_class_dot_env(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({".env.production"}, CFG))
+
+    def test_sensitive_class_terraform_tf(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"terraform/main.tf"}, CFG))
+
+    def test_sensitive_class_k8s(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"k8s/deployment.yaml"}, CFG))
+
+    def test_sensitive_class_helm(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"helm/chart/values.yaml"}, CFG))
+
+    def test_sensitive_class_charts(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"charts/app/Chart.yaml"}, CFG))
+
+    def test_sensitive_class_dockerfile(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"Dockerfile.prod"}, CFG))
+
+    def test_sensitive_class_docker_compose(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"docker-compose.yml"}, CFG))
+
+    def test_sensitive_class_migrations(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"db/migrations/001.sql"}, CFG))
+
+    def test_sensitive_class_auth_path_segment(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"pkg/wallet/auth/util.go"}, CFG))
+
+    def test_sensitive_class_github_workflows_case_variant(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({".GitHub/Workflows/ci.yml"}, CFG))
+
+    def test_sensitive_class_codeowners(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"CODEOWNERS"}, CFG))
+
+    def test_sensitive_class_reviewers_config(self):
+        self.assertFalse(all_paths_allowlisted_for_auto({"rulesets/reviewers.json"}, CFG))
+
+    def test_deterministic_eligible_requires_allowlist_and_denied_paths(self):
+        import embedded_gate as eg
+
+        paths = {"docs/only.md"}
+        orig = eg.agent_denied_paths_successful
+        eg.agent_denied_paths_successful = lambda _h: True
+        try:
+            self.assertTrue(deterministic_auto_approve_eligible(paths, CFG, HEAD))
+            eg.agent_denied_paths_successful = lambda _h: False
+            self.assertFalse(deterministic_auto_approve_eligible(paths, CFG, HEAD))
+        finally:
+            eg.agent_denied_paths_successful = orig
+
+
 class TestAgentDeniedPathsCheck(unittest.TestCase):
     def test_agent_denied_paths_successful_reads_conclusion(self):
         import embedded_gate as eg
@@ -240,7 +320,6 @@ class TestAgentDeniedPathsCheck(unittest.TestCase):
         finally:
             eg.urllib.request.urlopen = orig_open
             eg.REPO, eg.TOKEN, eg.API = orig_repo, orig_token, orig_api
-
 
     def test_mode_empty_string_fails_closed(self):
         import os

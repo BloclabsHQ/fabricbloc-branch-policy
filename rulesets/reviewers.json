@@ -2,6 +2,13 @@
   "_comment": "Fallback routing when fabricbloc-reviewer App cannot auto-approve. Path globs use fnmatch (** supported). Highest priority wins.",
   "verdict_approval_enabled": false,
   "default_reviewer": "madagentpm",
+  "deterministic_auto_approve_allowlist": [
+    "docs/**",
+    "**/*.md",
+    "**/test/fixtures/**",
+    "**/tests/fixtures/**",
+    "**/__fixtures__/**"
+  ],
   "trusted_verdict_identities": [
     {
       "login": "madgeniusblink",

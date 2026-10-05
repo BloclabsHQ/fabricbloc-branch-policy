@@ -9,7 +9,8 @@ Canon: `rulesets/reviewers.json` loaded from `fabricbloc-branch-policy` at **`pi
 **fabricbloc-reviewer** (App **5185203**, bot **337673700**) may submit APPROVE only when:
 
 - `agent-denied-paths` is **success** on the head commit,
-- routing is the **default** (`madagentpm`) with **no sensitive/cris** class, and
+- **every** changed path (new **and** `previous_filename` on renames) is on the pinned **`deterministic_auto_approve_allowlist`** in `rulesets/reviewers.json` (deny-by-default; matching is **case-insensitive**),
+- no **cris_required** route matches, and
 - `REVIEWER_APP_TOKEN` is minted (requires org/repo **`REVIEWER_APP_CLIENT_ID`** var + **`REVIEWER_APP_PRIVATE_KEY`** secret). If the key is missing, the workflow **skips** token mint with a notice (no fail solely for missing key).
 
 ## Routing (priority)
