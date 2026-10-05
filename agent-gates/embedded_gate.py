@@ -78,7 +78,9 @@ VERDICT_RE = re.compile(
 )
 CODE_FENCE_RE = re.compile(r"```(?:[^\n]*\n)?.*?```", re.DOTALL)
 REVIEWERS_JSON = "rulesets/reviewers.json"
+GATE_OWNERS_JSON = "rulesets/gate-owners.json"
 CANON_JSON = "rulesets/canon.json"
+MAX_ISSUE_EVENTS = 10000
 MAX_ISSUE_COMMENTS = 10000
 HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
 _BOT_TYPES = "feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style"
@@ -516,6 +518,119 @@ def load_reviewers_config():
     """Never read reviewers.json from the PR head; use pinned policy SHA or main."""
     ref = policy_reviewers_ref()
     return policy_repo_file(REVIEWERS_JSON, ref)
+
+
+def load_gate_owners_config():
+    """Never read gate-owners.json from the PR head; use pinned policy SHA or main."""
+    ref = policy_reviewers_ref()
+    return policy_repo_file(GATE_OWNERS_JSON, ref)
+
+
+def gate_owner_identity_matches(actor, owners):
+    login = ((actor or {}).get("login") or "").strip().lower()
+    uid = (actor or {}).get("id")
+    if not login or uid is None:
+        return False
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return False
+    for entry in owners or []:
+        elogin = (entry.get("login") or "").strip().lower()
+        try:
+            euid = int(entry.get("user_id"))
+        except (TypeError, ValueError):
+            continue
+        if login == elogin and uid == euid:
+            return True
+    return False
+
+
+def paginate_issue_events(repo, number):
+    out = []
+    page = 1
+    while True:
+        batch = call(
+            f"/repos/{repo}/issues/{number}/events?per_page=100&page={page}"
+        )
+        if not isinstance(batch, list):
+            fail("unexpected issue events shape")
+        out.extend(batch)
+        if len(out) >= MAX_ISSUE_EVENTS:
+            if len(batch) == 100:
+                fail(f"issue events exceed cap {MAX_ISSUE_EVENTS}; failing closed")
+            break
+        if len(batch) < 100:
+            break
+        page += 1
+    return out
+
+
+def owner_approved_label_timeline(events, label_name):
+    needle = (label_name or "").strip().lower()
+    if not needle:
+        return []
+    out = []
+    for ev in events:
+        if ev.get("event") not in ("labeled", "unlabeled"):
+            continue
+        name = ((ev.get("label") or {}).get("name") or "").strip().lower()
+        if name == needle:
+            out.append(ev)
+    return out
+
+
+def head_commit_committer_date(repo, head):
+    item = call(f"/repos/{repo}/commits/{head}")
+    commit = (item or {}).get("commit") or {}
+    ts = (commit.get("committer") or {}).get("date") or (commit.get("author") or {}).get("date")
+    if not ts:
+        fail(f"commit {head[:12]} lacks committer timestamp; failing closed")
+    return ts
+
+
+def owner_approval_valid_for_head(repo, number, head, owners_cfg):
+    """Return (True, detail) when label owner-approved is audited for current head."""
+    label = (owners_cfg.get("owner_approved_label") or "owner-approved").strip()
+    owners = owners_cfg.get("gate_owners") or []
+    if not owners:
+        return False, "gate_owners empty in gate-owners.json"
+    labels = call(f"/repos/{repo}/issues/{number}/labels")
+    if not isinstance(labels, list):
+        fail("unexpected PR labels shape")
+    present = {(lab.get("name") or "").strip().lower() for lab in labels}
+    if label.lower() not in present:
+        return False, f"label {label!r} not present on PR"
+    events = paginate_issue_events(repo, number)
+    timeline = owner_approved_label_timeline(events, label)
+    if not timeline:
+        return False, f"no labeled/unlabeled timeline for {label!r}"
+    newest = timeline[-1]
+    if newest.get("event") != "labeled":
+        return False, f"newest {label!r} timeline event is unlabeled"
+    actor = newest.get("actor") or {}
+    if not gate_owner_identity_matches(actor, owners):
+        login = (actor.get("login") or "?")
+        return False, f"{label!r} labeled event actor {login!r} is not a configured gate owner"
+    labeled_at = newest.get("created_at") or ""
+    head_at = head_commit_committer_date(repo, head)
+    if labeled_at < head_at:
+        return False, (
+            f"owner approval at {labeled_at} predates current head commit ({head_at}); "
+            "re-apply label after push"
+        )
+    who = (actor.get("login") or "owner")
+    return True, f"owner-approved for head {head[:12]} by {who}"
+
+
+def owner_gate_passes(repo, number, head):
+    cfg = load_gate_owners_config()
+    ok, detail = owner_approval_valid_for_head(repo, number, head, cfg)
+    if ok:
+        print(f"{MODE}: {detail} (AG-06 owner override)")
+        return True
+    print(f"{MODE}: owner override not satisfied ({detail})")
+    return False
 
 
 def normalize_repo_path(path):
@@ -1115,11 +1230,19 @@ def main():
         verdict_eligible = sorted(
             p for p in paths if classify_agent_path_tier(p, denied) == "verdict_eligible"
         )
-        for p in cris_only:
-            print(
-                f"::error file={p}::Cris-only denied path for agent PRs "
-                "(ARCH-0048 / AG-04; needs Cris or admin bypass)"
-            )
+        if cris_only:
+            if owner_gate_passes(REPO, number, head):
+                for p in cris_only:
+                    print(
+                        f"::notice file={p}::Cris-only path cleared by owner-approved (AG-06)"
+                    )
+                cris_only = []
+            else:
+                for p in cris_only:
+                    print(
+                        f"::error file={p}::Cris-only denied path for agent PRs "
+                        "(ARCH-0048 / AG-04; needs owner-approved label from gate owner or human branch)"
+                    )
         for p in verdict_eligible:
             print(
                 f"::notice file={p}::Verdict-eligible path "
@@ -1219,6 +1342,9 @@ def main():
         fail(f"open CHANGES_REQUESTED from {blocked}")
     ok = sorted(l for l, r in latest.items()
                 if approval_qualifies(r, head, allow, excluded, reviewer_bots))
+    if not ok and owner_gate_passes(REPO, number, head):
+        print(f"{MODE}: owner override satisfies review-of-record at {head[:12]}")
+        return
     if not ok:
         if ror_job == "gate":
             fail(

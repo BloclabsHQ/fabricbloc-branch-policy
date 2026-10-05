@@ -18,6 +18,7 @@ One row per enforced rule. Consumers pin this repo at a release SHA and cite IDs
 | CU-10 | 04-cursor | Phase-in: new sessions only; grandfather MadEngineer in-flight + `agent/autonomous/**` | Harness | domains/04-cursor/tests/test_cloud_sessions.py |
 | AG-04 | 03-agent-gates | Deny agent PR edits under floor paths; `.cursor/**` and `.claude/**` warn-first (`PROVIDER_CONTROL_ENFORCE`) | Pinned `agent-denied-paths` | agent-gates/test.py |
 | AG-05 | 03-agent-gates | Projection must be URL or pinned SHA/release asset, not parent checkout/submodule | Pinned `agent-denied-paths` (`PROJECTION_ENFORCE`) | agent-gates/test.py |
+| AG-06 | 03-agent-gates | Configured gate owner label `owner-approved` (audited timeline + head commit) clears Cris-only denied paths and satisfies review-of-record | Pinned gates + `rulesets/gate-owners.json` | agent-gates/test.py |
 | MR-11 | 02-merge-rulesets | fabricbloc deployment envs: no admin bypass; agent-ops deploys from main only; prevent_self_review when reviewers set | Scheduled `policy-env-drift.yml` | domains/02-merge-rulesets/env-drift/tests/test_env_drift.py |
 | SE-01 | 05-secrets | Name matches `<SCOPE>_<TYPE>[_NEXT]` or grandfather list | `lint_registry.py` (report-only) | domains/05-secrets/tests/test_secrets_registry.py |
 | SE-02 | 05-secrets | No `GH_*`/`GITHUB_*` refs; not `PAT`, `BLOC_TOKEN`, `FABRIC_TOKEN` | `lint_registry.py` (report-only) | domains/05-secrets/tests/test_secrets_registry.py |

@@ -147,10 +147,24 @@ def commit(login="Madgeniusblink", email="m@example.com", sha="c" * 40,
                        "committer": {"name": cl or "x", "email": ce}}}
 
 
+def policy_repo_routes():
+    """Fake GitHub contents API for pinned policy JSON (never PR head)."""
+    canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+    gate_owners = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
+    reviewers = json.loads((ROOT / "rulesets" / "reviewers.json").read_text())
+    base = "/repos/BloclabsHQ/fabricbloc-branch-policy/contents/"
+    return {
+        base + urllib.parse.quote("rulesets/canon.json"): json.dumps(canon),
+        base + urllib.parse.quote("rulesets/gate-owners.json"): json.dumps(gate_owners),
+        base + urllib.parse.quote("rulesets/reviewers.json"): json.dumps(reviewers),
+    }
+
+
 def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", author_id=None,
           files=(".github/workflows/a.yml",), commits=None, reviews=(), manifest=MANIFEST, head=HEAD,
           changed=None, ncommits=None, renames=(), engine_config=None, base_ref="main",
-          commit_pulls=None, repo="BloclabsHQ/fabricbloc"):
+          commit_pulls=None, repo="BloclabsHQ/fabricbloc",
+          issue_labels=(), issue_events=(), head_commit_date="2026-10-05T10:00:00Z"):
     commits = [commit()] if commits is None else commits
     fl = []
     for f in files:
@@ -171,7 +185,16 @@ def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", au
         f"{pr_base}/reviews": list(reviews),
         "manifest": json.dumps(manifest) if manifest is not None else None,
         **({"config": engine_config} if engine_config is not None else {}),
+        f"/repos/{repo}/issues/7/labels": [{"name": n} for n in issue_labels],
+        f"/repos/{repo}/issues/7/events": list(issue_events),
+        f"/repos/{repo}/commits/{head}": {
+            "commit": {
+                "committer": {"date": head_commit_date},
+                "author": {"date": head_commit_date},
+            }
+        },
     }
+    routes.update(policy_repo_routes())
     commit_pulls = commit_pulls or {}
     for c in commits:
         sha = c.get("sha")
@@ -182,6 +205,7 @@ def setup(ref="madgeniusblink/feat/x", author="Madgeniusblink", atype="User", au
             routes[key] = commit_pulls[sha]
         else:
             routes[key] = []
+    routes.update(policy_repo_routes())
     Fake.routes = routes
 
 
@@ -433,6 +457,126 @@ class T(unittest.TestCase):
         setup(files=(".github/workflows/agent-denied-paths.yml",), **AGENT)
         code, out = run("agent-denied-paths")
         self.assertEqual(code, 1, out); self.assertIn("denied path", out)
+
+    def test_agent_denied_paths_triggers_include_label_events(self):
+        doc = yaml.safe_load((WF / "agent-denied-paths.yml").read_text())
+        on = doc.get("on") or doc.get(True) or {}
+        types = (on.get("pull_request") or {}).get("types") or []
+        self.assertIn("labeled", types)
+        self.assertIn("unlabeled", types)
+
+    def test_cris_only_without_owner_approval_fails(self):
+        setup(files=(".github/workflows/ci.yml",), **AGENT)
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("Cris-only", out)
+
+    def test_cris_only_owner_approved_label_passes_denied_paths(self):
+        ev = {
+            "event": "labeled",
+            "label": {"name": "owner-approved"},
+            "actor": {"login": "madgeniusblink", "id": 42707764},
+            "created_at": "2026-10-05T11:00:00Z",
+        }
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(ev,),
+            head_commit_date="2026-10-05T10:00:00Z",
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("AG-06 owner override", out)
+
+    def test_owner_approval_stale_after_push_fails(self):
+        ev = {
+            "event": "labeled",
+            "label": {"name": "owner-approved"},
+            "actor": {"login": "madgeniusblink", "id": 42707764},
+            "created_at": "2026-10-05T09:00:00Z",
+        }
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(ev,),
+            head_commit_date="2026-10-05T10:00:00Z",
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("predates current head", out)
+
+    def test_owner_approval_wrong_actor_fails(self):
+        ev = {
+            "event": "labeled",
+            "label": {"name": "owner-approved"},
+            "actor": {"login": "notcris", "id": 1},
+            "created_at": "2026-10-05T11:00:00Z",
+        }
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(ev,),
+            **AGENT,
+        )
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_owner_unlabeled_revokes_pass(self):
+        events = (
+            {
+                "event": "labeled",
+                "label": {"name": "owner-approved"},
+                "actor": {"login": "madgeniusblink", "id": 42707764},
+                "created_at": "2026-10-05T11:00:00Z",
+            },
+            {
+                "event": "unlabeled",
+                "label": {"name": "owner-approved"},
+                "actor": {"login": "madgeniusblink", "id": 42707764},
+                "created_at": "2026-10-05T11:05:00Z",
+            },
+        )
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=events,
+            **AGENT,
+        )
+        self.assertEqual(run("agent-denied-paths")[0], 1)
+
+    def test_review_of_record_owner_approval_passes_without_github_approve(self):
+        ev = {
+            "event": "labeled",
+            "label": {"name": "owner-approved"},
+            "actor": {"login": "madgeniusblink", "id": 42707764},
+            "created_at": "2026-10-05T11:00:00Z",
+        }
+        setup(
+            files=(".github/workflows/ci.yml",),
+            reviews=[],
+            issue_labels=("owner-approved",),
+            issue_events=(ev,),
+            head_commit_date="2026-10-05T10:00:00Z",
+            **AGENT,
+        )
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 0, out)
+        self.assertIn("owner override satisfies review-of-record", out)
+
+    def test_gate_owner_identity_requires_login_and_user_id(self):
+        ns = load_gate_constants()
+        owners = [{"login": "madgeniusblink", "user_id": 42707764}]
+        self.assertTrue(
+            ns["gate_owner_identity_matches"](
+                {"login": "Madgeniusblink", "id": 42707764}, owners
+            )
+        )
+        self.assertFalse(
+            ns["gate_owner_identity_matches"](
+                {"login": "madgeniusblink", "id": 1}, owners
+            )
+        )
 
     def test_human_pr_not_gated(self):
         setup()
@@ -895,6 +1039,8 @@ class T(unittest.TestCase):
         for key in ("pull_request", "pull_request_target"):
             types = (on.get(key) or {}).get("types") or []
             self.assertIn("edited", types, key)
+            self.assertIn("labeled", types, key)
+            self.assertIn("unlabeled", types, key)
         gate = (doc.get("jobs") or {}).get("agent-review-of-record") or {}
         self.assertNotIn("environment", gate)
         gate_if = gate.get("if") or ""
