@@ -17,14 +17,17 @@ from embedded_gate import (  # noqa: E402
     body_without_code_fences,
     changed_paths_from_files,
     check_run_from_github_actions,
+    classify_agent_path_tier,
     classify_review_routes,
     deterministic_auto_approve_eligible,
     issue_comment_edited,
-    is_trusted_verdict_author,
-    parse_verdict_from_comments,
+    is_verdict_app_author,
+    parse_verdict_markers_from_comments,
     path_eligible_for_auto_approve,
     path_is_safe_for_auto_approve,
+    required_verdict_reviewers,
     try_reviewer_automation,
+    verdict_approval_satisfied,
 )
 
 HEAD = "a" * 40
@@ -33,6 +36,19 @@ CFG = json.loads((ROOT.parent / "rulesets" / "reviewers.json").read_text())
 DENIED = list(FLOOR_DENIED)
 CURSOR_ID = 199161495
 CRIS_ID = 42707764
+VERDICT_BOT = "fabricbloc-verdict[bot]"
+VERDICT_BOT_ID = 900001
+CFG_VERDICT = {
+    **CFG,
+    "verdict_app": {"login": VERDICT_BOT, "user_id": VERDICT_BOT_ID},
+}
+
+
+def verdict_marker(reviewer, head, verdict="PASS"):
+    return (
+        f"<!-- fabricbloc-verdict v1 reviewer={reviewer} "
+        f"verdict={verdict} head={head} -->"
+    )
 
 
 def comment(body, login="cursoragent", user_id=CURSOR_ID, edited=False):
@@ -50,12 +66,66 @@ def eligible(paths):
     return all_paths_eligible_for_auto(paths, CFG, REPO, DENIED)
 
 
+class TestTwoTierDeniedPaths(unittest.TestCase):
+    def test_workflows_cris_only(self):
+        self.assertEqual(
+            classify_agent_path_tier(".github/workflows/ci.yml", DENIED), "cris_only")
+
+    def test_approval_relay_cris_only(self):
+        self.assertEqual(
+            classify_agent_path_tier("agents/runtime/engine/approval_relay/handler.py", DENIED),
+            "cris_only",
+        )
+
+    def test_gov_adr_cris_only(self):
+        self.assertEqual(
+            classify_agent_path_tier("architecture/decisions/GOV-0033-d1.md", DENIED),
+            "cris_only",
+        )
+
+    def test_non_gov_adr_verdict_eligible(self):
+        self.assertEqual(
+            classify_agent_path_tier("architecture/decisions/ARCH-0045.md", DENIED),
+            "verdict_eligible",
+        )
+
+    def test_engine_non_test_py_cris_only(self):
+        self.assertEqual(
+            classify_agent_path_tier("agents/runtime/engine/runner.py", DENIED),
+            "cris_only",
+        )
+
+    def test_engine_test_py_verdict_eligible(self):
+        self.assertEqual(
+            classify_agent_path_tier("agents/runtime/engine/tests/test_runner.py", DENIED),
+            "verdict_eligible",
+        )
+
+    def test_engine_readme_verdict_eligible(self):
+        self.assertEqual(
+            classify_agent_path_tier("agents/runtime/engine/README.md", DENIED),
+            "verdict_eligible",
+        )
+
+    def test_engine_manifest_cris_only(self):
+        self.assertEqual(
+            classify_agent_path_tier(
+                "agents/runtime/engine/policy/cursor-env/manifest.json", DENIED),
+            "cris_only",
+        )
+
+    def test_rename_out_of_cris_only_stays_cris(self):
+        self.assertEqual(
+            classify_agent_path_tier(".github/workflows/old.yml", DENIED), "cris_only")
+
+
 class TestReviewerRouting(unittest.TestCase):
     def test_verdict_regex(self):
-        body = "<!-- fb-verdict: PASS reviewer=sentinel sha=" + HEAD + " -->"
+        body = verdict_marker("sentinel", HEAD)
         m = VERDICT_RE.search(body)
         self.assertIsNotNone(m)
         self.assertEqual(m.group("reviewer"), "sentinel")
+        self.assertEqual(m.group("verdict"), "PASS")
 
     def test_classify_fabricbloc_src_auth_sentinel(self):
         rev, cris, sens, matched = classify_review_routes(
@@ -118,76 +188,114 @@ class TestReviewerRouting(unittest.TestCase):
         self.assertEqual(rev, "sentinel")
         self.assertFalse(cris)
 
-    def test_trusted_identity_requires_login_and_id(self):
-        cfg = dict(CFG, verdict_approval_enabled=True)
+    def test_verdict_app_identity_requires_login_and_id(self):
         self.assertTrue(
-            is_trusted_verdict_author({"login": "cursoragent", "id": CURSOR_ID}, cfg)
+            is_verdict_app_author(
+                {"login": VERDICT_BOT, "id": VERDICT_BOT_ID}, CFG_VERDICT)
         )
         self.assertFalse(
-            is_trusted_verdict_author({"login": "cursoragent", "id": 1}, cfg)
+            is_verdict_app_author({"login": VERDICT_BOT, "id": 1}, CFG_VERDICT)
         )
         self.assertFalse(
-            is_trusted_verdict_author({"login": "evil", "id": CURSOR_ID}, cfg)
+            is_verdict_app_author({"login": "evil[bot]", "id": VERDICT_BOT_ID}, CFG_VERDICT)
         )
 
-    def test_self_pass_verdict_rejected(self):
-        cfg = dict(CFG, verdict_approval_enabled=True)
-        marker = f"<!-- fb-verdict: PASS reviewer=madagentpm sha={HEAD} -->"
-        comments = [comment(marker, login="cursoragent", user_id=CURSOR_ID)]
-        v, author = parse_verdict_from_comments(
-            comments, HEAD, "madagentpm", {"cursoragent"}, cfg)
-        self.assertIsNone(v)
-        self.assertIsNone(author)
+    def test_user_id_zero_fail_closed(self):
+        cfg = {**CFG_VERDICT, "verdict_app": {"login": VERDICT_BOT, "user_id": 0}}
+        paths = {"architecture/decisions/ARCH-0045.md"}
+        comments = [comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=0)]
+        ok, reason = verdict_approval_satisfied(
+            comments, HEAD, paths, cfg, set(), DENIED, "agent/session/feat/x-y")
+        self.assertFalse(ok)
+        self.assertIn("user_id", reason)
 
     def test_verdict_disabled_by_canon_flag(self):
-        cfg = dict(CFG, verdict_approval_enabled=False)
-        marker = f"<!-- fb-verdict: PASS reviewer=madagentpm sha={HEAD} -->"
-        comments = [comment(marker, login="otherhuman", user_id=999)]
-        v, _ = parse_verdict_from_comments(comments, HEAD, "madagentpm", set(), cfg)
-        self.assertIsNone(v)
+        cfg = {**CFG_VERDICT, "verdict_approval_enabled": False}
+        comments = [comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID)]
+        markers = parse_verdict_markers_from_comments(comments, HEAD, set(), cfg)
+        self.assertEqual(markers, {})
 
     def test_fenced_marker_ignored(self):
-        cfg = dict(CFG, verdict_approval_enabled=True)
-        inner = f"<!-- fb-verdict: PASS reviewer=madagentpm sha={HEAD} -->"
+        inner = verdict_marker("madagentpm", HEAD)
         body = f"```html\n{inner}\n```"
-        comments = [comment(body, login="madgeniusblink", user_id=CRIS_ID)]
-        v, _ = parse_verdict_from_comments(comments, HEAD, "madagentpm", set(), cfg)
-        self.assertIsNone(v)
+        comments = [comment(body, login=VERDICT_BOT, user_id=VERDICT_BOT_ID)]
+        markers = parse_verdict_markers_from_comments(comments, HEAD, set(), CFG_VERDICT)
+        self.assertEqual(markers, {})
 
     def test_edited_comment_ignored(self):
-        cfg = dict(CFG, verdict_approval_enabled=True)
-        marker = f"<!-- fb-verdict: PASS reviewer=madagentpm sha={HEAD} -->"
-        comments = [comment(marker, login="madgeniusblink", user_id=CRIS_ID, edited=True)]
-        v, _ = parse_verdict_from_comments(comments, HEAD, "madagentpm", set(), cfg)
-        self.assertIsNone(v)
+        comments = [
+            comment(
+                verdict_marker("madagentpm", HEAD),
+                login=VERDICT_BOT,
+                user_id=VERDICT_BOT_ID,
+                edited=True,
+            )
+        ]
+        markers = parse_verdict_markers_from_comments(comments, HEAD, set(), CFG_VERDICT)
+        self.assertEqual(markers, {})
 
-    def test_wrong_reviewer_slug_rejected(self):
-        cfg = dict(CFG, verdict_approval_enabled=True)
-        marker = f"<!-- fb-verdict: PASS reviewer=sentinel sha={HEAD} -->"
-        comments = [comment(marker, login="madgeniusblink", user_id=CRIS_ID)]
-        v, _ = parse_verdict_from_comments(
-            comments, HEAD, "madagentpm", set(), cfg)
-        self.assertIsNone(v)
+    def test_wrong_app_id_rejected(self):
+        comments = [comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=1)]
+        markers = parse_verdict_markers_from_comments(comments, HEAD, set(), CFG_VERDICT)
+        self.assertEqual(markers, {})
 
-    def test_stale_sha_rejected(self):
-        cfg = dict(CFG, verdict_approval_enabled=True)
-        marker = f"<!-- fb-verdict: PASS reviewer=madagentpm sha={OLD} -->"
-        comments = [comment(marker, login="madgeniusblink", user_id=CRIS_ID)]
-        v, _ = parse_verdict_from_comments(comments, HEAD, "madagentpm", set(), cfg)
-        self.assertIsNone(v)
+    def test_stale_head_rejected(self):
+        comments = [comment(verdict_marker("madagentpm", OLD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID)]
+        markers = parse_verdict_markers_from_comments(comments, HEAD, set(), CFG_VERDICT)
+        self.assertEqual(markers, {})
 
-    def test_valid_verdict_when_enabled(self):
-        cfg = dict(CFG, verdict_approval_enabled=True)
-        marker = f"<!-- fb-verdict: PASS reviewer=madagentpm sha={HEAD} -->"
-        comments = [comment(marker, login="madgeniusblink", user_id=CRIS_ID)]
-        v, author = parse_verdict_from_comments(
-            comments, HEAD, "madagentpm", set(), cfg)
-        self.assertEqual(v, "madagentpm")
-        self.assertEqual(author, "madgeniusblink")
+    def test_fail_verdict_blocks_approval(self):
+        paths = {"architecture/decisions/ARCH-0045.md"}
+        comments = [
+            comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+            comment(verdict_marker("aether", HEAD, "FAIL"), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+        ]
+        import embedded_gate as eg
+
+        orig = eg.agent_denied_paths_successful
+        eg.agent_denied_paths_successful = lambda _h: True
+        try:
+            ok, reason = verdict_approval_satisfied(
+                comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
+        finally:
+            eg.agent_denied_paths_successful = orig
+        self.assertFalse(ok)
+        self.assertIn("aether", reason)
+
+    def test_valid_verdict_all_required(self):
+        paths = {"architecture/decisions/ARCH-0045.md"}
+        comments = [
+            comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+            comment(verdict_marker("aether", HEAD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+        ]
+        import embedded_gate as eg
+
+        orig = eg.agent_denied_paths_successful
+        eg.agent_denied_paths_successful = lambda _h: True
+        try:
+            ok, reason = verdict_approval_satisfied(
+                comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
+        finally:
+            eg.agent_denied_paths_successful = orig
+        self.assertTrue(ok, reason)
+
+    def test_missing_madagentpm_blocks(self):
+        paths = {"architecture/decisions/ARCH-0045.md"}
+        comments = [comment(verdict_marker("aether", HEAD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID)]
+        import embedded_gate as eg
+
+        orig = eg.agent_denied_paths_successful
+        eg.agent_denied_paths_successful = lambda _h: True
+        try:
+            ok, _ = verdict_approval_satisfied(
+                comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
+        finally:
+            eg.agent_denied_paths_successful = orig
+        self.assertFalse(ok)
 
     def test_body_without_code_fences(self):
-        inner = "<!-- fb-verdict: PASS reviewer=x sha=" + HEAD + " -->"
-        self.assertNotIn("fb-verdict", body_without_code_fences(f"```\n{inner}\n```"))
+        inner = verdict_marker("x", HEAD)
+        self.assertNotIn("fabricbloc-verdict", body_without_code_fences(f"```\n{inner}\n```"))
 
     def test_issue_comment_edited(self):
         self.assertFalse(issue_comment_edited({"created_at": "a", "updated_at": "a"}))
@@ -203,17 +311,17 @@ class TestReviewerRouting(unittest.TestCase):
 
         orig = eg.post_issue_comment
         orig_denied = eg.agent_denied_paths_successful
-        orig_find = eg.find_trusted_verdict
+        orig_page = eg.paginate
         eg.post_issue_comment = fake_post
         eg.agent_denied_paths_successful = lambda _head: False
-        eg.find_trusted_verdict = lambda *a, **k: (None, None)
+        eg.paginate = lambda *a, **k: []
         try:
             ok = try_reviewer_automation(
-                7, HEAD, {"docs/x.md"}, CFG, {"cursoragent"}, DENIED)
+                7, HEAD, {"docs/x.md"}, CFG, {"cursoragent"}, DENIED, "agent/session/feat/x-y")
         finally:
             eg.post_issue_comment = orig
             eg.agent_denied_paths_successful = orig_denied
-            eg.find_trusted_verdict = orig_find
+            eg.paginate = orig_page
         self.assertFalse(ok)
         self.assertTrue(any("needs-review" in p for p in posts))
 

@@ -73,9 +73,10 @@ jobs:
           ENGINE_CONFIG = "agents/runtime/engine/config.yaml"
           # Floor: applies even if a later human PR thins the base manifest.
           FLOOR_DENIED = [
-              "agents/runtime/engine/", "agents/agents.yaml", ".github/workflows/",
-              ".github/actions/", "decisions/", "architecture/decisions/",
+              "agents/agents.yaml", ".github/workflows/",
+              ".github/actions/", "decisions/",
               "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS",
+              "rulesets/",
               ".gitmodules",
               "scripts/github-check.sh",
               "scripts/branch-name-policy*",
@@ -83,6 +84,9 @@ jobs:
               "scripts/canon-entry-budget.py",
               "scripts/x64-toolchain-inventory.json",
           ]
+          ARCH_DECISIONS_PREFIX = "architecture/decisions/"
+          ENGINE_PREFIX = "agents/runtime/engine/"
+          VALID_VERDICT_REVIEWER_SLUGS = frozenset({"madagentpm", "sentinel", "aether", "warden"})
           # Q9 provider control surfaces (AG-04): warn-first; hard-fail via PROVIDER_CONTROL_ENFORCE=fail (see DECISIONS F6-D7).
           FLOOR_PROVIDER_CONTROL = [".cursor/", ".claude/"]
           # Remaining Q9 manifest proposed_additions (e.g. ops/): see DECISIONS.md F6-D7; flip after founder yes.
@@ -121,8 +125,8 @@ jobs:
           APPROVAL_REF_RE = re.compile(
               r"approval-ref:\s*(slack:\d+\.\d+|cli:[A-Za-z0-9._-]{6,64})")
           VERDICT_RE = re.compile(
-              r"<!--\s*fb-verdict:\s*PASS\s+reviewer=(?P<reviewer>[a-z0-9-]+)\s+"
-              r"sha=(?P<sha>[0-9a-f]{40})\s*-->",
+              r"<!--\s*fabricbloc-verdict\s+v1\s+reviewer=(?P<reviewer>[a-z0-9-]+)\s+"
+              r"verdict=(?P<verdict>PASS|FAIL)\s+head=(?P<head>[0-9a-f]{40})\s*-->",
               re.IGNORECASE,
           )
           CODE_FENCE_RE = re.compile(r"```(?:[^\n]*\n)?.*?```", re.DOTALL)
@@ -597,6 +601,86 @@ jobs:
               return any(path_matches_denied_entry(path, e) for e in (denied_entries or []))
 
 
+          def path_has_canon_json_basename(path):
+              norm = normalize_repo_path(path)
+              return norm.endswith("/canon.json") or norm == "canon.json"
+
+
+          def path_has_approval_relay_segment(path):
+              return "approval_relay" in normalize_repo_path(path).replace("\\", "/").split("/")
+
+
+          def path_under_engine(path):
+              norm = normalize_repo_path(path)
+              return norm.startswith(ENGINE_PREFIX) or norm == ENGINE_PREFIX.rstrip("/")
+
+
+          def path_is_gov_decision(path):
+              norm = normalize_repo_path(path)
+              if not norm.startswith(ARCH_DECISIONS_PREFIX):
+                  return False
+              rest = norm[len(ARCH_DECISIONS_PREFIX):]
+              if not rest:
+                  return False
+              first = rest.split("/")[0]
+              return first.startswith("gov-")
+
+
+          def path_is_engine_verdict_eligible(path):
+              if not path_under_engine(path):
+                  return False
+              if path_has_approval_relay_segment(path):
+                  return False
+              norm = normalize_repo_path(path)
+              base = norm.rsplit("/", 1)[-1]
+              if base == "manifest.json":
+                  return False
+              if base.endswith(".md"):
+                  return True
+              if "/tests/" in f"/{norm}/" or norm.endswith("/tests"):
+                  return True
+              if base.startswith("test") and base.endswith(".py"):
+                  return True
+              if base.endswith("_test.py"):
+                  return True
+              return False
+
+
+          def path_is_engine_cris_only(path):
+              if not path_under_engine(path):
+                  return False
+              norm = normalize_repo_path(path)
+              if "approved-actions" in norm or "approved_actions" in norm:
+                  return True
+              if path_is_engine_verdict_eligible(path):
+                  return False
+              return True
+
+
+          def classify_agent_path_tier(path, denied_entries):
+              """cris_only | verdict_eligible | allowed. Unsafe paths fail closed as cris_only."""
+              if not path_is_safe_for_auto_approve(path):
+                  return "cris_only"
+              if path_has_canon_json_basename(path) or path_has_approval_relay_segment(path):
+                  return "cris_only"
+              if path_matches_denied(path, denied_entries):
+                  return "cris_only"
+              norm = normalize_repo_path(path)
+              if norm.startswith(ARCH_DECISIONS_PREFIX):
+                  if path_is_gov_decision(path):
+                      return "cris_only"
+                  return "verdict_eligible"
+              if path_under_engine(path):
+                  if path_is_engine_cris_only(path):
+                      return "cris_only"
+                  return "verdict_eligible"
+              return "allowed"
+
+
+          def path_tier_blocks_auto_approve(path, denied_entries):
+              return classify_agent_path_tier(path, denied_entries) != "allowed"
+
+
           def path_matches_auto_approve_exclusion(path, cfg):
               for pattern in cfg.get("deterministic_auto_approve_exclusions") or []:
                   if path_matches_glob_ci(path, pattern):
@@ -676,7 +760,7 @@ jobs:
                   return False
               if path_matches_any_review_route(path, cfg, repo_full):
                   return False
-              if path_matches_denied(path, denied_entries):
+              if path_tier_blocks_auto_approve(path, denied_entries):
                   return False
               return path_on_auto_approve_allowlist(path, cfg)
 
@@ -727,22 +811,26 @@ jobs:
               return reviewer, cris, sensitive, matched
 
 
-          def trusted_verdict_identities(cfg):
-              out = set()
-              for entry in cfg.get("trusted_verdict_identities") or []:
-                  if not isinstance(entry, dict):
-                      continue
-                  login = (entry.get("login") or "").strip().lower()
-                  uid = entry.get("user_id")
-                  if login and uid is not None:
-                      try:
-                          out.add((login, int(uid)))
-                      except (TypeError, ValueError):
-                          continue
-              return out
+          def verdict_app_identity(cfg):
+              """Pinned fabricbloc-verdict App (login + numeric user id). user_id 0 = fail closed."""
+              app = cfg.get("verdict_app") or {}
+              login = (app.get("login") or "").strip().lower()
+              uid = app.get("user_id")
+              if not login or uid is None:
+                  return None
+              try:
+                  uid = int(uid)
+              except (TypeError, ValueError):
+                  return None
+              if uid == 0:
+                  return None
+              return (login, uid)
 
 
-          def is_trusted_verdict_author(user, cfg):
+          def is_verdict_app_author(user, cfg):
+              ident = verdict_app_identity(cfg)
+              if not ident:
+                  return False
               login = ((user or {}).get("login") or "").strip().lower()
               uid = (user or {}).get("id")
               if not login or uid is None:
@@ -751,7 +839,7 @@ jobs:
                   uid = int(uid)
               except (TypeError, ValueError):
                   return False
-              return (login, uid) in trusted_verdict_identities(cfg)
+              return (login, uid) == ident
 
 
           def body_without_code_fences(text):
@@ -762,12 +850,12 @@ jobs:
               return (c.get("created_at") or "") != (c.get("updated_at") or "")
 
 
-          def parse_verdict_from_comments(comments, head, expected_reviewer, excluded_logins, cfg):
-              """Trusted PASS markers only outside fences; login+id; not from PR participants."""
+          def parse_verdict_markers_from_comments(comments, head, excluded_logins, cfg):
+              """Newest fabricbloc-verdict v1 marker per reviewer slug (PASS|FAIL) at exact head."""
               if not cfg.get("verdict_approval_enabled"):
-                  return None, None
-              expected = (expected_reviewer or "").lower()
+                  return {}
               excluded = {x.lower() for x in excluded_logins if x}
+              by_reviewer = {}
               for c in reversed(comments):
                   if issue_comment_edited(c):
                       continue
@@ -775,21 +863,68 @@ jobs:
                   login = (user.get("login") or "").lower()
                   if login in excluded:
                       continue
-                  if not is_trusted_verdict_author(user, cfg):
+                  if not is_verdict_app_author(user, cfg):
                       continue
                   body = body_without_code_fences(c.get("body") or "")
-                  m = VERDICT_RE.search(body)
-                  if not m or m.group("sha") != head:
-                      continue
-                  if m.group("reviewer").lower() != expected:
-                      continue
-                  return expected, login
-              return None, None
+                  for m in VERDICT_RE.finditer(body):
+                      if m.group("head") != head:
+                          continue
+                      slug = m.group("reviewer").lower()
+                      if slug not in VALID_VERDICT_REVIEWER_SLUGS:
+                          continue
+                      verdict = m.group("verdict").upper()
+                      if slug not in by_reviewer:
+                          by_reviewer[slug] = verdict
+              return by_reviewer
 
 
-          def find_trusted_verdict(number, head, expected_reviewer, excluded_logins, cfg):
-              comments = paginate(f"/repos/{REPO}/issues/{number}/comments", MAX_ISSUE_COMMENTS)
-              return parse_verdict_from_comments(comments, head, expected_reviewer, excluded_logins, cfg)
+          def required_verdict_reviewers(paths, cfg, repo_full, head_ref, denied_entries):
+              default = (cfg.get("default_reviewer") or "madagentpm").lower()
+              required = {default}
+              routed, _cris, sensitive, matched = classify_review_routes(repo_full, paths, cfg)
+              if matched:
+                  required.add(routed.lower())
+              has_verdict_adr = False
+              has_verdict_engine = False
+              for p in paths:
+                  tier = classify_agent_path_tier(p, denied_entries)
+                  if tier != "verdict_eligible":
+                      continue
+                  norm = normalize_repo_path(p)
+                  if norm.startswith(ARCH_DECISIONS_PREFIX):
+                      has_verdict_adr = True
+                  elif path_under_engine(p):
+                      has_verdict_engine = True
+              if has_verdict_adr:
+                  required.add("aether")
+                  if sensitive:
+                      required.add("sentinel")
+              if has_verdict_engine:
+                  required.add("sentinel")
+              bot = attributed_bot_from_head_ref(head_ref)
+              if bot:
+                  required.discard(bot.lower())
+              return required
+
+
+          def verdict_approval_satisfied(comments, head, paths, cfg, excluded_logins, denied_entries, head_ref):
+              if not cfg.get("verdict_approval_enabled"):
+                  return False, "verdict_approval_enabled is false"
+              if not verdict_app_identity(cfg):
+                  return False, "verdict_app user_id unset or zero (fail closed until Cris pins the App id)"
+              if any(classify_agent_path_tier(p, denied_entries) == "cris_only" for p in paths):
+                  return False, "Cris-only path in diff"
+              if not agent_denied_paths_successful(head):
+                  return False, "newest agent-denied-paths (GitHub Actions app 15368) not success on head"
+              required = required_verdict_reviewers(paths, cfg, REPO, head_ref, denied_entries)
+              markers = parse_verdict_markers_from_comments(comments, head, excluded_logins, cfg)
+              for rev in required:
+                  if markers.get(rev) != "PASS":
+                      return False, f"missing PASS verdict for `{rev}` at head"
+              for rev, verdict in markers.items():
+                  if verdict == "FAIL" and rev in required:
+                      return False, f"FAIL verdict for `{rev}` at head"
+              return True, None
 
 
           def check_run_from_github_actions(run):
@@ -852,7 +987,7 @@ jobs:
               )
 
 
-          def try_reviewer_automation(number, head, paths, cfg, excluded_logins, denied_entries):
+          def try_reviewer_automation(number, head, paths, cfg, excluded_logins, denied_entries, head_ref):
               reviewer, cris, sensitive, _matched = classify_review_routes(REPO, paths, cfg)
               default = cfg.get("default_reviewer") or "madagentpm"
               if cris:
@@ -874,20 +1009,26 @@ jobs:
                       f"{MODE}: deterministic auto-approve eligible but REVIEWER_APP_TOKEN unset; "
                       "skipping App approval (configure REVIEWER_APP_PRIVATE_KEY when ready)"
                   )
-              verdict_reviewer, verdict_author = find_trusted_verdict(
-                  number, head, reviewer, excluded_logins, cfg)
-              if verdict_reviewer and app_token:
-                  submit_reviewer_app_approve(number, head, app_token, verdict_reviewer)
+              comments = paginate(f"/repos/{REPO}/issues/{number}/comments", MAX_ISSUE_COMMENTS)
+              ok, reason = verdict_approval_satisfied(
+                  comments, head, paths, cfg, excluded_logins, denied_entries, head_ref)
+              if ok and app_token:
+                  required = required_verdict_reviewers(paths, cfg, REPO, head_ref, denied_entries)
+                  submit_reviewer_app_approve(number, head, app_token, reviewer)
                   print(
-                      f"{MODE}: App APPROVE submitted from trusted verdict by {verdict_author} "
-                      f"(reviewer={verdict_reviewer})"
+                      f"{MODE}: App APPROVE from fabricbloc-verdict PASS markers "
+                      f"(required reviewers: {sorted(required)})"
                   )
                   return True
-              if verdict_reviewer and not app_token:
+              if ok and not app_token:
                   print(
-                      f"{MODE}: trusted PASS verdict present but REVIEWER_APP_TOKEN unset; "
+                      f"{MODE}: verdict path satisfied but REVIEWER_APP_TOKEN unset; "
                       "skipping App approval (configure REVIEWER_APP_PRIVATE_KEY when ready)"
                   )
+              marker_hint = (
+                  f"<!-- fabricbloc-verdict v1 reviewer=<madagentpm|sentinel|aether|warden> "
+                  f"verdict=PASS head={head} -->"
+              )
               post_issue_comment(
                   number,
                   f"<!-- fb-routing: needs-review reviewer={reviewer} -->\n"
@@ -895,10 +1036,12 @@ jobs:
                   + (
                       "Verdict-based App approval is disabled (`verdict_approval_enabled: false`). "
                       if not cfg.get("verdict_approval_enabled")
-                      else f"Post PASS verdict `<!-- fb-verdict: PASS reviewer={reviewer} sha={head} -->` "
-                           "from a trusted non-participant identity, "
+                      else (
+                          f"Post unedited PASS markers via **fabricbloc-verdict[bot]** ({marker_hint}). "
+                          f"{reason or 'Waiting for required verdicts.'} "
+                      )
                   )
-                  + "or address gate findings.",
+                  + "Or address gate findings.",
               )
               return False
 
@@ -988,21 +1131,32 @@ jobs:
                           f"::warning file={path}::no diff patch (binary or too large); "
                           "AG-05 cannot scan added lines"
                       )
-                      if PROJECTION_ENFORCE == "fail" and path_matches_denied(path, denied):
+                      if PROJECTION_ENFORCE == "fail" and classify_agent_path_tier(path, denied) == "cris_only":
                           missing_patch_denied.append(path)
                   if missing_patch_denied:
                       for p in sorted(missing_patch_denied):
                           print(
-                              f"::error file={p}::denied path with no diff patch "
+                              f"::error file={p}::Cris-only denied path with no diff patch "
                               "(AG-04; PROJECTION_ENFORCE=fail)"
                           )
-                      fail(f"{len(missing_patch_denied)} denied path(s) without diff patch")
+                      fail(f"{len(missing_patch_denied)} Cris-only denied path(s) without diff patch")
 
-                  bad = sorted(p for p in paths if path_matches_denied(p, denied))
-                  for p in bad:
-                      print(f"::error file={p}::denied path for agent PRs (ARCH-0048 decision 5 / AG-04)")
-                  if bad:
-                      fail(f"{len(bad)} denied path(s)")
+                  cris_only = sorted(p for p in paths if classify_agent_path_tier(p, denied) == "cris_only")
+                  verdict_eligible = sorted(
+                      p for p in paths if classify_agent_path_tier(p, denied) == "verdict_eligible"
+                  )
+                  for p in cris_only:
+                      print(
+                          f"::error file={p}::Cris-only denied path for agent PRs "
+                          "(ARCH-0048 / AG-04; needs Cris or admin bypass)"
+                      )
+                  for p in verdict_eligible:
+                      print(
+                          f"::notice file={p}::Verdict-eligible path "
+                          "(agent-denied-paths passes; review-of-record needs fabricbloc-verdict PASS)"
+                      )
+                  if cris_only:
+                      fail(f"{len(cris_only)} Cris-only denied path(s)")
 
                   provider_hits = sorted(
                       p for p in paths if path_matches_denied(p, FLOOR_PROVIDER_CONTROL)
@@ -1041,7 +1195,10 @@ jobs:
                   if proj and PROJECTION_ENFORCE == "fail":
                       fail(f"{len(set(proj))} projection violation(s)")
 
-                  print(f"{MODE}: {len(paths)} path(s), none denied.")
+                  print(
+                      f"{MODE}: {len(paths)} path(s); "
+                      f"{len(verdict_eligible)} verdict-eligible, 0 Cris-only."
+                  )
                   return
 
               # agent-review-of-record: ai_reviewers may approve; they never qualify for human skip.
@@ -1081,7 +1238,8 @@ jobs:
                   if author:
                       excluded_logins.add(author)
                   denied_globs = denied_path_globs(manifest)
-                  if try_reviewer_automation(number, head, paths, cfg, excluded_logins, denied_globs):
+                  if try_reviewer_automation(
+                          number, head, paths, cfg, excluded_logins, denied_globs, head_ref):
                       reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
                       latest = {}
                       for r in reviews:

@@ -4,7 +4,7 @@
 
 Agent PRs are authored by **`cursoragent`** (and related agent identities). Any verdict or approval path that trusts the same logins lets an agent **PASS its own PR**. Review-of-record must come from an identity that cannot be the PR author or a commit participant.
 
-Today **`verdict_approval_enabled`** is **`false`** in `rulesets/reviewers.json`. The **fabricbloc-reviewer** App may auto-approve only the **deterministic** case: `agent-denied-paths` green, default **`madagentpm`** route, no sensitive/cris class. Everything else is routed and labeled for human or specialist review.
+**`verdict_approval_enabled`** is **`true`** in `rulesets/reviewers.json`, but **`verdict_app.user_id`** stays **`0`** until Cris creates **fabricbloc-verdict** and Warden pins the numeric bot id — until then verdict auto-approve **fails closed**. The **fabricbloc-reviewer** App still auto-approves **deterministic** docs/fixtures when allowed.
 
 ## Options
 
@@ -12,9 +12,9 @@ Today **`verdict_approval_enabled`** is **`false`** in `rulesets/reviewers.json`
 
 Create **`fabricbloc-verdict`** (separate from **fabricbloc-reviewer**):
 
-- The verdict App posts issue comments containing `<!-- fb-verdict: PASS reviewer=<slug> sha=<head> -->` from its bot login only.
-- Store the verdict App **private key only** in the **Cursor cloud environments** of reviewer agents (Sentinel, Warden, Aether, MadAgentPM) — **not** in GitHub Actions secrets.
-- Pin **`trusted_verdict_identities`** to the verdict App bot **`(login, user_id)`** pair in `rulesets/reviewers.json` (never author/committer logins).
+- The verdict App posts issue comments containing `<!-- fabricbloc-verdict v1 reviewer=<slug> verdict=PASS|FAIL head=<head> -->` from its bot login only.
+- Store the verdict App **private key only** in reviewer bot secrets (MadAgentPM, Sentinel, Aether, Warden) — **not** author bots, **not** Actions for verdict posting.
+- Pin **`verdict_app`** `{ login, user_id }` in `rulesets/reviewers.json` (never author/committer logins).
 - Keep **fabricbloc-reviewer** in Actions with minimal repo scope; it only submits the GitHub **APPROVE** after the gate validates a verdict (when enabled) or deterministic auto-approve.
 
 **Cris setup:** create App, install on target repos, add bot to `ai_reviewers` in engine config via human PR, add identity to `trusted_verdict_identities`, distribute key to reviewer cloud envs, set `verdict_approval_enabled: true` via human PR + ruleset re-pin.
@@ -31,4 +31,4 @@ Disable all App automation; require a human **User** approval at head. Simplest 
 
 **Option A** — separate **fabricbloc-verdict** App whose key never enters Actions, paired login+id in canon, **`verdict_approval_enabled`** flipped only after Cris validates end-to-end on a probe PR.
 
-Until then, leave **`verdict_approval_enabled: false`** and rely on routing labels plus deterministic auto-approve for default-route agent PRs with green denied-paths.
+Until **`verdict_app.user_id`** is non-zero, rely on routing labels plus deterministic auto-approve for low-risk paths; verdict-eligible ADRs/engine tests need Cris setup per `docs/FABRICBLOC-VERDICT-APP-SETUP.md` (or repo upload copy).
