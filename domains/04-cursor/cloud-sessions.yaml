@@ -8,8 +8,9 @@ launch:
     strategy: find_by_pr_then_reply
     never_relaunch_if_agent_exists: true
   branch_name:
-    # GOV-0022 agent grammar (same as branch-name-guard AGENT_RE).
+    # GOV-0022 agent grammar (legacy dual-accept; see branch-name-guard LEGACY_AGENT_RE).
     session_branch_regex: '^agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+$'
+    bot_branch_regex: '^agent/(warden|madengineer|madagentpm|sentinel|sweeper|aether|loom|anvil|madgeniusbot|cursoragent)/(chore|feat|fix|test)/[a-z0-9-]+$'
   registry:
     recheck_and_claim_before_launch: true
     dedupe_after_launch: true

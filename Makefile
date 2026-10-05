@@ -1,6 +1,11 @@
 .PHONY: validate
 validate:
 	python3 agent-gates/validate_canon.py
+	python3 branch-name-guard/sync_embedded.py
+	test -z "$$(git diff --name-only .github/workflows/branch-name-guard.yml 2>/dev/null)" || git diff --exit-code .github/workflows/branch-name-guard.yml
+	bash branch-name-guard/test.sh
+	python3 agent-gates/sync_embedded_gate.py
+	test -z "$$(git diff --name-only .github/workflows/agent-denied-paths.yml .github/workflows/agent-review-of-record.yml 2>/dev/null)" || git diff --exit-code .github/workflows/agent-denied-paths.yml .github/workflows/agent-review-of-record.yml
 	python3 agent-gates/test.py
 	python3 hygiene/sync_embedded_hygiene.py
 	test -z "$$(git diff --name-only .github/workflows/hygiene-*.yml 2>/dev/null)" || git diff --exit-code .github/workflows/hygiene-*.yml

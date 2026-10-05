@@ -1,0 +1,15 @@
+{
+  "_comment": "Lowercase bot slugs for agent/<bot>/<kind>/<slug> (GOV-0022 amendment). Extend only via human PR.",
+  "bots": [
+    "anvil",
+    "aether",
+    "cursoragent",
+    "loom",
+    "madagentpm",
+    "madengineer",
+    "madgeniusbot",
+    "sentinel",
+    "sweeper",
+    "warden"
+  ]
+}

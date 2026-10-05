@@ -58,6 +58,24 @@ REVIEWER_APP_BOTS = {("fabricbloc-reviewer[bot]", 337673700)}
 APPROVAL_REF_RE = re.compile(
     r"approval-ref:\s*(slack:\d+\.\d+|cli:[A-Za-z0-9._-]{6,64})")
 HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
+BOT_BRANCH_RE = re.compile(
+    r"^agent/([a-z0-9-]+)/(chore|feat|fix|test)/[a-z0-9-]+$"
+)
+LEGACY_AGENT_HEAD_RE = re.compile(
+    r"^agent/(session|autonomous)/"
+    r"(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/"
+    r"([a-z0-9]+)(?:-[a-z0-9-]+)*$"
+)
+
+
+def attributed_bot_from_head_ref(head_ref):
+    m = BOT_BRANCH_RE.match(head_ref or "")
+    if m:
+        return m.group(1).lower()
+    m = LEGACY_AGENT_HEAD_RE.match(head_ref or "")
+    if m:
+        return m.group(3).lower()
+    return ""
 MAX_FILES = 3000   # pulls/{n}/files hard limit
 MAX_COMMITS = 250  # pulls/{n}/commits hard limit
 MAX_COMMIT_PULLS = 500  # commits/{sha}/pulls hard limit
@@ -444,6 +462,9 @@ def main():
         print(f"{MODE}: not gated ({why[0]}); human merge authority applies.")
         return
     print(f"{MODE}: gated because: {'; '.join(why[:5])}")
+    bot = attributed_bot_from_head_ref(head_ref)
+    if bot:
+        print(f"::notice title=attributed_bot::{bot}")
 
     if MODE == "agent-denied-paths":
         changed_n = int(pr.get("changed_files") or 0)
