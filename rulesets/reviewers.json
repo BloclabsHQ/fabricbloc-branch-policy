@@ -1,0 +1,51 @@
+{
+  "_comment": "Fallback routing when fabricbloc-reviewer App cannot auto-approve. Path globs use fnmatch (** supported).",
+  "default_reviewer": "madagentpm",
+  "trusted_verdict_logins": [
+    "madgeniusblink",
+    "cursoragent"
+  ],
+  "routes": [
+    {
+      "id": "wallet-auth-crypto-secrets",
+      "repos": [
+        "fabric-wallet"
+      ],
+      "path_globs": [
+        "**/auth/**",
+        "**/crypto/**",
+        "**/secrets/**"
+      ],
+      "reviewer": "sentinel"
+    },
+    {
+      "id": "iac-infra",
+      "path_globs": [
+        "iac/**",
+        "infra/**",
+        "**/*.tf"
+      ],
+      "reviewer": "aether"
+    },
+    {
+      "id": "policy-workflows",
+      "path_globs": [
+        ".github/workflows/**",
+        "rulesets/**",
+        "policy/**",
+        "**/canon.json"
+      ],
+      "reviewer": "warden"
+    },
+    {
+      "id": "prod-iam-secrets",
+      "path_globs": [
+        "**/prod/**",
+        "**/iam/**",
+        "**/secrets/**"
+      ],
+      "reviewer": "madagentpm",
+      "cris_required": true
+    }
+  ]
+}

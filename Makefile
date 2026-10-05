@@ -2,6 +2,7 @@
 validate:
 	python3 agent-gates/validate_canon.py
 	python3 agent-gates/test.py
+	python3 agent-gates/test_reviewer_routing.py
 	python3 hygiene/sync_embedded_hygiene.py
 	test -z "$$(git diff --name-only .github/workflows/hygiene-*.yml 2>/dev/null)" || git diff --exit-code .github/workflows/hygiene-*.yml
 	python3 -m unittest discover -s hygiene -p 'test_*.py'

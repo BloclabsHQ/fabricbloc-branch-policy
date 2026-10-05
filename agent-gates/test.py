@@ -69,7 +69,13 @@ def assert_required_gate_hosted_only():
 
 def embedded(name):
     doc = yaml.safe_load((WF / f"{name}.yml").read_text())
-    run = doc["jobs"][name]["steps"][0]["run"]
+    run = None
+    for step in doc["jobs"][name]["steps"]:
+        if isinstance(step.get("run"), str) and "<<'PY'" in step["run"]:
+            run = step["run"]
+            break
+    if run is None:
+        raise KeyError(f"no embedded PY step in {name}.yml")
     start = run.index("<<'PY'\n") + len("<<'PY'\n")
     return run[start:run.rindex("\nPY")]
 
