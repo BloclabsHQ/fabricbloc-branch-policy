@@ -842,6 +842,83 @@ class T(unittest.TestCase):
         )
         self.assertEqual(run("agent-review-of-record")[0], 1)
 
+    def test_humans_from_manifest_empty_floors_gov_handles(self):
+        ns = load_gate_constants()
+        self.assertEqual(
+            ns["humans_from_manifest"]({}),
+            set(ns["GOV_HUMAN_HANDLES"]),
+        )
+        self.assertEqual(
+            ns["humans_from_manifest"]({"operators": {"members_expected": []}}),
+            set(ns["GOV_HUMAN_HANDLES"]),
+        )
+
+    def test_review_of_record_allowlist_empty_manifest_includes_reviewer_bot(self):
+        ns = load_gate_constants()
+        humans = ns["humans_from_manifest"]({})
+        allow = ns["review_of_record_allowlist"](humans, None, ns["REVIEWER_APP_BOTS"])
+        self.assertIn(ns["GOV_HUMAN_HANDLES"][0], allow)
+        self.assertIn(REVIEWER_BOT, allow)
+
+    def test_review_of_record_allowlist_empty_inputs_stays_empty(self):
+        ns = load_gate_constants()
+        self.assertEqual(ns["review_of_record_allowlist"](set(), None, set()), set())
+
+    def test_context_empty_manifest_review_not_blocked_on_allowlist(self):
+        setup(
+            files=("docs/x.md",),
+            manifest={},
+            repo="BloclabsHQ/context",
+            reviews=[],
+            **AGENT,
+        )
+        code, out = run("agent-review-of-record", repo="BloclabsHQ/context")
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("no reviewer allowlist", out)
+
+    def test_gate_workflows_checks_write_permission(self):
+        denied = yaml.safe_load((WF / "agent-denied-paths.yml").read_text()).get("permissions") or {}
+        self.assertEqual(denied.get("checks"), "write")
+        ror_doc = yaml.safe_load((WF / "agent-review-of-record.yml").read_text())
+        gate_job = (ror_doc.get("jobs") or {}).get("agent-review-of-record") or {}
+        gate_perms = gate_job.get("permissions") or {}
+        self.assertEqual(gate_perms.get("checks"), "write")
+        mint_job = (ror_doc.get("jobs") or {}).get("reviewer-app-auto-approve") or {}
+        self.assertEqual(mint_job.get("environment"), "reviewer")
+        mint_perms = mint_job.get("permissions") or {}
+        self.assertEqual(mint_perms.get("issues"), "write")
+
+    def test_review_of_record_split_pull_request_and_target(self):
+        doc = yaml.safe_load((WF / "agent-review-of-record.yml").read_text())
+        on = doc.get("on") or doc.get(True) or {}
+        for key in ("pull_request", "pull_request_target"):
+            types = (on.get(key) or {}).get("types") or []
+            self.assertIn("edited", types, key)
+        gate = (doc.get("jobs") or {}).get("agent-review-of-record") or {}
+        self.assertNotIn("environment", gate)
+        gate_if = gate.get("if") or ""
+        self.assertIn("pull_request", gate_if)
+        mint = (doc.get("jobs") or {}).get("reviewer-app-auto-approve") or {}
+        self.assertEqual(mint.get("environment"), "reviewer")
+        mint_if = mint.get("if") or ""
+        self.assertIn("pull_request_target", mint_if)
+        gate_step = gate["steps"][0]
+        gate_env = gate_step.get("env") or {}
+        self.assertEqual(gate_env.get("ROR_JOB"), "gate")
+        self.assertNotIn("REVIEWER_APP_TOKEN", gate_env)
+        self.assertNotIn("REVIEWER_APP_PRIVATE_KEY", str(gate))
+        mint_run = [s for s in mint["steps"] if s.get("env", {}).get("ROR_JOB") == "mint"][0]
+        self.assertIn("REVIEWER_APP_TOKEN", mint_run["env"])
+
+    def test_reviewer_env_docs_forbid_refs_pull_deployment_rules(self):
+        text = (ROOT / "docs" / "REVIEWER-IDENTITY.md").read_text()
+        low = text.lower()
+        self.assertIn("refs/pull", text)
+        self.assertTrue(
+            "may not match" in low or "must not match" in low,
+            "docs must forbid refs/pull/* deployment rules",
+        )
+
     def test_reviewer_app_approval_at_head_valid_body_passes(self):
         cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
         setup(files=("docs/x.md",),
@@ -1080,7 +1157,10 @@ class T(unittest.TestCase):
         for name in GATES:
             doc = yaml.safe_load((WF / f"{name}.yml").read_text())
             pr_on = doc.get("on") or doc.get(True) or {}
-            pr = pr_on.get("pull_request") if isinstance(pr_on, dict) else None
+            if name == "agent-review-of-record":
+                pr = pr_on.get("pull_request_target") if isinstance(pr_on, dict) else None
+            else:
+                pr = pr_on.get("pull_request") if isinstance(pr_on, dict) else None
             types = pr.get("types") if isinstance(pr, dict) else None
             self.assertIsNotNone(types, name)
             self.assertIn("edited", types, name)

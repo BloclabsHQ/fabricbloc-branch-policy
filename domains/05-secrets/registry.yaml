@@ -254,6 +254,54 @@ entries:
     expires: null
     replace_with: null
 
+  - name: REVIEWER_APP_CLIENT_ID
+    type: null
+    kind: app
+    stored_as: variable
+    github:
+      - scope: environment
+        repos:
+          - BloclabsHQ/fabricbloc
+          - BloclabsHQ/context
+          - BloclabsHQ/keyflo-session-issuer
+        environment: reviewer
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: MadAgentPM
+    rotation_days: null
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
+
+  - name: REVIEWER_APP_PRIVATE_KEY
+    type: null
+    kind: app
+    stored_as: secret
+    github:
+      - scope: environment
+        repos:
+          - BloclabsHQ/fabricbloc
+          - BloclabsHQ/context
+          - BloclabsHQ/keyflo-session-issuer
+        environment: reviewer
+        visibility: null
+    onepassword_item: null
+    runtime_env: null
+    permissions: null
+    owner_role: null
+    custodian: MadAgentPM
+    rotation_days: 180
+    last_rotated: null
+    status: active
+    replaces: null
+    expires: null
+    replace_with: null
+
   - name: POLICY_AUDIT_APP_ID
     type: null
     kind: app

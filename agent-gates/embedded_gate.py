@@ -426,6 +426,27 @@ def manifest_at(sha):
         fail("base manifest is not valid JSON")
 
 
+def humans_from_manifest(manifest):
+    """GOV-0022 allowlist from base manifest; floor when members_expected is missing or empty."""
+    raw = (manifest.get("operators") or {}).get("members_expected") or []
+    humans = {h for h in raw if h}
+    if not humans:
+        humans = set(GOV_HUMAN_HANDLES)
+    return humans
+
+
+def review_of_record_allowlist(humans, cfg, reviewer_bots):
+    """Review-of-record allowlist: manifest humans, engine config, pinned reviewer App bots."""
+    allow = set(humans)
+    if cfg:
+        for key in ("human", "ai_reviewers"):
+            parsed = parse_flow_list_line(cfg, key)
+            if parsed not in (None, False):
+                allow |= parsed
+    allow |= {login for login, _ in reviewer_bots}
+    return allow
+
+
 def participants(commits, allow, author):
     out = {author} if author else set()
     for c in commits:
@@ -1024,7 +1045,7 @@ def main():
     author_type = (pr.get("user") or {}).get("type") or ""
     author_id = (pr.get("user") or {}).get("id")
     manifest = manifest_at(base_sha)
-    humans = set((manifest.get("operators") or {}).get("members_expected") or [])
+    humans = humans_from_manifest(manifest)
     cfg = base_text(ENGINE_CONFIG, base_sha)
     ai_rev = ai_reviewers_from_cfg(cfg)
     reported_commits = int(pr.get("commits") or 0)
@@ -1150,14 +1171,41 @@ def main():
         return
 
     # agent-review-of-record: ai_reviewers may approve; they never qualify for human skip.
-    allow = set(humans)
-    if cfg:
-        for key in ("human", "ai_reviewers"):
-            parsed = parse_flow_list_line(cfg, key)
-            if parsed not in (None, False):
-                allow |= parsed
+    ror_job = (os.environ.get("ROR_JOB") or "combined").strip().lower()
+    if ror_job not in ("gate", "mint", "combined"):
+        fail(f"unknown ROR_JOB {ror_job!r}")
+    allow = review_of_record_allowlist(humans, cfg, reviewer_bots)
     if not allow:
         fail("no reviewer allowlist at base (manifest operators.members_expected)")
+
+    def run_reviewer_automation():
+        changed_n = int(pr.get("changed_files") or 0)
+        if changed_n > MAX_FILES:
+            fail(f"PR changes {changed_n} files (> {MAX_FILES}); cannot list them all")
+        files = paginate(f"/repos/{REPO}/pulls/{number}/files", MAX_FILES)
+        if len(files) != changed_n:
+            fail(
+                f"file count mismatch (PR says {changed_n}, listed {len(files)}); "
+                "failing closed before auto-approve"
+            )
+        paths = changed_paths_from_files(files)
+        reviewers_cfg = load_reviewers_config()
+        excluded = participants(commits, allow, author)
+        excluded_logins = set(excluded)
+        if author:
+            excluded_logins.add(author)
+        denied_globs = denied_path_globs(manifest)
+        return try_reviewer_automation(
+            number, head, paths, reviewers_cfg, excluded_logins, denied_globs, head_ref
+        )
+
+    if ror_job == "mint":
+        if run_reviewer_automation():
+            print(f"{MODE}: mint job submitted App APPROVE at {head[:12]}")
+        else:
+            print(f"{MODE}: mint job did not submit App APPROVE (waiting on verdicts or env PEM)")
+        return
+
     excluded = participants(commits, allow, author)
     reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
     latest = {}
@@ -1171,23 +1219,12 @@ def main():
     ok = sorted(l for l, r in latest.items()
                 if approval_qualifies(r, head, allow, excluded, reviewer_bots))
     if not ok:
-        changed_n = int(pr.get("changed_files") or 0)
-        if changed_n > MAX_FILES:
-            fail(f"PR changes {changed_n} files (> {MAX_FILES}); cannot list them all")
-        files = paginate(f"/repos/{REPO}/pulls/{number}/files", MAX_FILES)
-        if len(files) != changed_n:
+        if ror_job == "gate":
             fail(
-                f"file count mismatch (PR says {changed_n}, listed {len(files)}); "
-                "failing closed before auto-approve"
+                f"no allowlisted, independent APPROVE at head {head[:12]}; "
+                "a new push needs a new review, then re-run this check"
             )
-        paths = changed_paths_from_files(files)
-        cfg = load_reviewers_config()
-        excluded_logins = set(excluded)
-        if author:
-            excluded_logins.add(author)
-        denied_globs = denied_path_globs(manifest)
-        if try_reviewer_automation(
-                number, head, paths, cfg, excluded_logins, denied_globs, head_ref):
+        if run_reviewer_automation():
             reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
             latest = {}
             for r in reviews:

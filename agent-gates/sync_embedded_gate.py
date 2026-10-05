@@ -17,10 +17,20 @@ def indent_block(text):
 def patch(name):
     path = WF / f"{name}.yml"
     text = path.read_text()
-    start = text.index("<<'PY'\n") + len("<<'PY'\n")
-    end = text.rindex("\n          PY")
-    new = text[:start] + indent_block(GATE_PATH.read_text()) + text[end:]
-    path.write_text(new)
+    gate_body = indent_block(GATE_PATH.read_text())
+    marker_start = "<<'PY'\n"
+    marker_end = "\n          PY"
+    out, pos = [], 0
+    while True:
+        i = text.find(marker_start, pos)
+        if i < 0:
+            out.append(text[pos:])
+            break
+        out.append(text[pos : i + len(marker_start)])
+        j = text.index(marker_end, i + len(marker_start))
+        out.append(gate_body)
+        pos = j
+    path.write_text("".join(out))
 
 
 def main():

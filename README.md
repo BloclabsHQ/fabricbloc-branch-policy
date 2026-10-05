@@ -228,7 +228,7 @@ Create the App in the BloclabsHQ org settings. It must not appear on any ruleset
 | Where can this GitHub App be installed? | **Only on this account** |
 | Installation | **fabricbloc only** — never install on `fabricbloc-branch-policy` |
 
-**Private key (hard rule):** The reviewer App private key is **never** stored as a GitHub Actions secret — not in this repo, not in org secrets, and not in environment secrets. It lives only in **Cris's personal 1Password vault** and is used through his **local CLI** when posting reviews.
+**Private key (Actions):** Store **`REVIEWER_APP_PRIVATE_KEY`** and **`REVIEWER_APP_CLIENT_ID`** only in environment **`reviewer`** on gated repos. Deployment rules: **`main` only** — **must not** match `refs/pull/*`. Split workflow: gate job on **`pull_request`** (no secrets); mint/approve on **`pull_request_target`** + env **`reviewer`** (API-only). See `docs/REVIEWER-IDENTITY.md`.
 
 **After creation:**
 
@@ -237,7 +237,7 @@ Create the App in the BloclabsHQ org settings. It must not appear on any ruleset
 3. Add the bot login to `ai_reviewers` in fabricbloc `agents/runtime/engine/config.yaml` via a **human PR only** — that path is denied for agent PRs (`agent-denied-paths`).
 4. Run **M6** (`agent-gates/probes/m6_retarget.sh`) on an agent PR retargeted to `release/**` and record outcomes for (i) and (ii).
 
-**Private key rotation:** Rotate the reviewer App key every **180 days**; update 1Password only (never Actions secrets). Re-pin org ruleset **24445414** after any gate constant change.
+**Private key rotation:** Rotate the reviewer App key every **180 days**; update the **`reviewer`** environment secret on each gated repo (and 1Password). Re-pin org ruleset **24445414** after any gate constant change.
 
 ## Unverified (TODO-VERIFY)
 
