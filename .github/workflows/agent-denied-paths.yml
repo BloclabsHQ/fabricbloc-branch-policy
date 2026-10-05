@@ -552,6 +552,45 @@ jobs:
               return paths
 
 
+          def denied_path_globs(manifest):
+              dp = (manifest or {}).get("denied_paths") or {}
+              denied = list(FLOOR_DENIED) + list(dp.get("arch_0048_baseline") or [])
+              if INCLUDE_PROPOSED:
+                  denied += list(dp.get("proposed_additions") or [])
+              return denied
+
+
+          def path_matches_denied_entry(path, entry):
+              norm = normalize_repo_path(path)
+              e = normalize_repo_path(entry)
+              if e.endswith("/"):
+                  return norm.startswith(e) or norm == e.rstrip("/")
+              return norm == e or norm.startswith(e + "/")
+
+
+          def path_matches_denied(path, denied_entries):
+              return any(path_matches_denied_entry(path, e) for e in (denied_entries or []))
+
+
+          def path_matches_auto_approve_exclusion(path, cfg):
+              for pattern in cfg.get("deterministic_auto_approve_exclusions") or []:
+                  if path_matches_glob_ci(path, pattern):
+                      return True
+              return False
+
+
+          def path_matches_any_review_route(path, cfg, repo_full):
+              short = repo_full.split("/", 1)[-1] if "/" in repo_full else repo_full
+              for route in cfg.get("routes") or []:
+                  repos = route.get("repos")
+                  if repos and short not in repos:
+                      continue
+                  for g in route.get("path_globs") or []:
+                      if path_matches_glob_ci(path, g):
+                          return True
+              return False
+
+
           def path_on_auto_approve_allowlist(path, cfg):
               allow = cfg.get("deterministic_auto_approve_allowlist") or []
               if not allow:
@@ -559,17 +598,26 @@ jobs:
               return any(path_matches_glob_ci(path, g) for g in allow)
 
 
-          def all_paths_allowlisted_for_auto(paths, cfg):
+          def path_eligible_for_auto_approve(path, cfg, repo_full, denied_entries):
+              if path_matches_auto_approve_exclusion(path, cfg):
+                  return False
+              if path_matches_any_review_route(path, cfg, repo_full):
+                  return False
+              if path_matches_denied(path, denied_entries):
+                  return False
+              return path_on_auto_approve_allowlist(path, cfg)
+
+
+          def all_paths_eligible_for_auto(paths, cfg, repo_full, denied_entries):
               if not paths:
                   return False
-              return all(path_on_auto_approve_allowlist(p, cfg) for p in paths)
+              return all(
+                  path_eligible_for_auto_approve(p, cfg, repo_full, denied_entries) for p in paths
+              )
 
 
-          def deterministic_auto_approve_eligible(paths, cfg, head):
-              if not all_paths_allowlisted_for_auto(paths, cfg):
-                  return False
-              _rev, cris, _sens, _matched = classify_review_routes(REPO, paths, cfg)
-              if cris:
+          def deterministic_auto_approve_eligible(paths, cfg, head, denied_entries):
+              if not all_paths_eligible_for_auto(paths, cfg, REPO, denied_entries):
                   return False
               return agent_denied_paths_successful(head)
 
@@ -717,7 +765,7 @@ jobs:
               )
 
 
-          def try_reviewer_automation(number, head, paths, cfg, excluded_logins):
+          def try_reviewer_automation(number, head, paths, cfg, excluded_logins, denied_entries):
               reviewer, cris, sensitive, _matched = classify_review_routes(REPO, paths, cfg)
               default = cfg.get("default_reviewer") or "madagentpm"
               if cris:
@@ -729,7 +777,7 @@ jobs:
                   )
                   fail("cris_required path class; App auto-approve blocked")
               app_token = os.environ.get("REVIEWER_APP_TOKEN", "").strip()
-              deterministic = deterministic_auto_approve_eligible(paths, cfg, head)
+              deterministic = deterministic_auto_approve_eligible(paths, cfg, head, denied_entries)
               if deterministic and app_token:
                   submit_reviewer_app_approve(number, head, app_token, reviewer)
                   print(f"{MODE}: App APPROVE (deterministic: gates green, default route `{reviewer}`)")
@@ -941,7 +989,8 @@ jobs:
                   excluded_logins = set(excluded)
                   if author:
                       excluded_logins.add(author)
-                  if try_reviewer_automation(number, head, paths, cfg, excluded_logins):
+                  denied_globs = denied_path_globs(manifest)
+                  if try_reviewer_automation(number, head, paths, cfg, excluded_logins, denied_globs):
                       reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
                       latest = {}
                       for r in reviews:

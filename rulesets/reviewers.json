@@ -4,10 +4,26 @@
   "default_reviewer": "madagentpm",
   "deterministic_auto_approve_allowlist": [
     "docs/**",
-    "**/*.md",
-    "**/test/fixtures/**",
-    "**/tests/fixtures/**",
-    "**/__fixtures__/**"
+    "**/fixtures/**",
+    "**/testdata/**"
+  ],
+  "deterministic_auto_approve_exclusions": [
+    ".github/**",
+    ".cursor/**",
+    ".claude/**",
+    ".codex/**",
+    "**/agents.md",
+    "**/claude.md",
+    "**/.cursorrules",
+    "**/skill.md",
+    "codeowners",
+    "**/codeowners",
+    "canon/**",
+    "rulesets/**",
+    "docs/adr/**",
+    "docs/gov*/**",
+    "security.md",
+    "**/security.md"
   ],
   "trusted_verdict_identities": [
     {

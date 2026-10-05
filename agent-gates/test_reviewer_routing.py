@@ -8,9 +8,11 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from embedded_gate import (  # noqa: E402
+    FLOOR_DENIED,
+    REPO,
     VERDICT_RE,
     agent_denied_paths_successful,
-    all_paths_allowlisted_for_auto,
+    all_paths_eligible_for_auto,
     body_without_code_fences,
     changed_paths_from_files,
     classify_review_routes,
@@ -18,12 +20,14 @@ from embedded_gate import (  # noqa: E402
     issue_comment_edited,
     is_trusted_verdict_author,
     parse_verdict_from_comments,
+    path_eligible_for_auto_approve,
     try_reviewer_automation,
 )
 
 HEAD = "a" * 40
 OLD = "b" * 40
 CFG = json.loads((ROOT.parent / "rulesets" / "reviewers.json").read_text())
+DENIED = list(FLOOR_DENIED)
 CURSOR_ID = 199161495
 CRIS_ID = 42707764
 
@@ -37,6 +41,10 @@ def comment(body, login="cursoragent", user_id=CURSOR_ID, edited=False):
         "updated_at": updated,
         "user": {"login": login, "id": user_id, "type": "User"},
     }
+
+
+def eligible(paths):
+    return all_paths_eligible_for_auto(paths, CFG, REPO, DENIED)
 
 
 class TestReviewerRouting(unittest.TestCase):
@@ -198,7 +206,7 @@ class TestReviewerRouting(unittest.TestCase):
         eg.find_trusted_verdict = lambda *a, **k: (None, None)
         try:
             ok = try_reviewer_automation(
-                7, HEAD, {"docs/x.md"}, CFG, {"cursoragent"})
+                7, HEAD, {"docs/x.md"}, CFG, {"cursoragent"}, DENIED)
         finally:
             eg.post_issue_comment = orig
             eg.agent_denied_paths_successful = orig_denied
@@ -217,58 +225,117 @@ class TestDeterministicAutoApproveAllowlist(unittest.TestCase):
 
     def test_rename_out_of_sensitive_dir_blocks_auto(self):
         paths = {"docs/relocated.md", "src/auth/legacy.go"}
-        self.assertFalse(all_paths_allowlisted_for_auto(paths, CFG))
+        self.assertFalse(eligible(paths))
 
     def test_case_variant_sensitive_path_denied(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"Src/Auth/handler.go"}, CFG))
+        self.assertFalse(eligible({"Src/Auth/handler.go"}))
 
     def test_unlisted_path_makefile_denied(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"Makefile"}, CFG))
+        self.assertFalse(eligible({"Makefile"}))
 
     def test_allowlisted_docs_only_passes(self):
-        self.assertTrue(all_paths_allowlisted_for_auto({"docs/guide.md"}, CFG))
+        self.assertTrue(eligible({"docs/guide.md"}))
+
+    def test_review_route_blocks_even_if_under_docs(self):
+        self.assertFalse(eligible({"docs/a.md", "iac/module/main.tf"}))
+
+    def test_denied_path_floor_blocks_engine(self):
+        self.assertFalse(eligible({"agents/runtime/engine/config.yaml"}))
+
+    def test_test_code_not_allowlisted(self):
+        self.assertFalse(eligible({"agent-gates/test_reviewer_routing.py"}))
+
+    def test_fixture_data_allowlisted(self):
+        self.assertTrue(eligible({"pkg/foo/testdata/input.json"}))
 
     def test_sensitive_class_secrets(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"secrets/registry.yaml"}, CFG))
+        self.assertFalse(eligible({"secrets/registry.yaml"}))
 
     def test_sensitive_class_pem_key(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"certs/server.pem"}, CFG))
+        self.assertFalse(eligible({"certs/server.pem"}))
 
     def test_sensitive_class_dot_env(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({".env.production"}, CFG))
+        self.assertFalse(eligible({".env.production"}))
 
     def test_sensitive_class_terraform_tf(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"terraform/main.tf"}, CFG))
+        self.assertFalse(eligible({"terraform/main.tf"}))
 
     def test_sensitive_class_k8s(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"k8s/deployment.yaml"}, CFG))
+        self.assertFalse(eligible({"k8s/deployment.yaml"}))
 
     def test_sensitive_class_helm(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"helm/chart/values.yaml"}, CFG))
+        self.assertFalse(eligible({"helm/chart/values.yaml"}))
 
     def test_sensitive_class_charts(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"charts/app/Chart.yaml"}, CFG))
+        self.assertFalse(eligible({"charts/app/Chart.yaml"}))
 
     def test_sensitive_class_dockerfile(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"Dockerfile.prod"}, CFG))
+        self.assertFalse(eligible({"Dockerfile.prod"}))
 
     def test_sensitive_class_docker_compose(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"docker-compose.yml"}, CFG))
+        self.assertFalse(eligible({"docker-compose.yml"}))
 
     def test_sensitive_class_migrations(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"db/migrations/001.sql"}, CFG))
+        self.assertFalse(eligible({"db/migrations/001.sql"}))
 
     def test_sensitive_class_auth_path_segment(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"pkg/wallet/auth/util.go"}, CFG))
+        self.assertFalse(eligible({"pkg/wallet/auth/util.go"}))
 
-    def test_sensitive_class_github_workflows_case_variant(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({".GitHub/Workflows/ci.yml"}, CFG))
+    def test_exclusion_github(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            ".github/workflows/ci.yml", CFG, REPO, DENIED))
 
-    def test_sensitive_class_codeowners(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"CODEOWNERS"}, CFG))
+    def test_exclusion_cursor(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            ".cursor/rules.json", CFG, REPO, DENIED))
 
-    def test_sensitive_class_reviewers_config(self):
-        self.assertFalse(all_paths_allowlisted_for_auto({"rulesets/reviewers.json"}, CFG))
+    def test_exclusion_claude(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            ".claude/settings.json", CFG, REPO, DENIED))
+
+    def test_exclusion_codex(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            ".codex/config.toml", CFG, REPO, DENIED))
+
+    def test_exclusion_agents_md(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "docs/AGENTS.md", CFG, REPO, DENIED))
+
+    def test_exclusion_claude_md(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "CLAUDE.md", CFG, REPO, DENIED))
+
+    def test_exclusion_cursorrules(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "apps/.cursorrules", CFG, REPO, DENIED))
+
+    def test_exclusion_skill_md(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            ".cursor/skills/foo/SKILL.md", CFG, REPO, DENIED))
+
+    def test_exclusion_codeowners(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "CODEOWNERS", CFG, REPO, DENIED))
+
+    def test_exclusion_canon(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "canon/policies.yaml", CFG, REPO, DENIED))
+
+    def test_exclusion_rulesets(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "rulesets/reviewers.json", CFG, REPO, DENIED))
+
+    def test_exclusion_docs_adr(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "docs/adr/0001-record.md", CFG, REPO, DENIED))
+
+    def test_exclusion_docs_gov(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "docs/gov-0033/policy.md", CFG, REPO, DENIED))
+
+    def test_exclusion_security_md(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "SECURITY.md", CFG, REPO, DENIED))
 
     def test_deterministic_eligible_requires_allowlist_and_denied_paths(self):
         import embedded_gate as eg
@@ -277,9 +344,11 @@ class TestDeterministicAutoApproveAllowlist(unittest.TestCase):
         orig = eg.agent_denied_paths_successful
         eg.agent_denied_paths_successful = lambda _h: True
         try:
-            self.assertTrue(deterministic_auto_approve_eligible(paths, CFG, HEAD))
+            self.assertTrue(
+                deterministic_auto_approve_eligible(paths, CFG, HEAD, DENIED))
             eg.agent_denied_paths_successful = lambda _h: False
-            self.assertFalse(deterministic_auto_approve_eligible(paths, CFG, HEAD))
+            self.assertFalse(
+                deterministic_auto_approve_eligible(paths, CFG, HEAD, DENIED))
         finally:
             eg.agent_denied_paths_successful = orig
 
@@ -325,11 +394,7 @@ class TestAgentDeniedPathsCheck(unittest.TestCase):
         import os
         import subprocess
 
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if k != "MODE"
-        }
+        env = {k: v for k, v in os.environ.items() if k != "MODE"}
         env.update({
             "MODE": "",
             "GH_TOKEN": "test",
