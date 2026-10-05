@@ -172,9 +172,10 @@ jobs:
           CANON_AGENT_GATES = "canon-agent-gates"
           GITHUB_ACTIONS_APP_ID = 15368
           AUTO_APPROVE_DOCS_EXTENSIONS = frozenset({
-              ".md", ".txt", ".rst", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp",
+              ".md", ".txt", ".rst", ".png", ".jpg", ".jpeg", ".gif", ".webp",
           })
           AUTO_APPROVE_FIXTURE_EXTENSIONS = AUTO_APPROVE_DOCS_EXTENSIONS | {".json", ".yaml", ".yml"}
+          AUTO_APPROVE_BLOCKED_EXTENSIONS = frozenset({".svg", ".html", ".htm"})
           RUNNABLE_BASENAMES = frozenset({
               "makefile", "package.json", "package-lock.json", "conf.py", "setup.py",
               "pyproject.toml", "cargo.toml", "go.mod", "dockerfile", "docker-compose.yml",
@@ -658,8 +659,8 @@ jobs:
               return any(norm.endswith(sfx) for sfx in RUNNABLE_SUFFIXES)
 
 
-          def path_on_auto_approve_allowlist(path, cfg):
-              del cfg  # extension + zone policy is pinned in gate code
+          def path_on_auto_approve_allowlist(path, _cfg):
+              """Zone + extension policy is pinned in gate code (not reviewers.json allowlist globs)."""
               if not path_is_safe_for_auto_approve(path):
                   return False
               if path_is_runnable_artifact(path):
@@ -669,7 +670,7 @@ jobs:
                   return False
               _root, ext = os.path.splitext(normalize_repo_path(path))
               ext = ext.lower()
-              if not ext:
+              if not ext or ext in AUTO_APPROVE_BLOCKED_EXTENSIONS:
                   return False
               if zone == "docs":
                   return ext in AUTO_APPROVE_DOCS_EXTENSIONS
@@ -804,9 +805,8 @@ jobs:
               try:
                   app_id = int(app.get("id") or 0)
               except (TypeError, ValueError):
-                  app_id = 0
-              slug = (app.get("slug") or "").lower()
-              return app_id == GITHUB_ACTIONS_APP_ID or slug == "github-actions"
+                  return False
+              return app_id == GITHUB_ACTIONS_APP_ID
 
 
           def agent_denied_paths_successful(head):

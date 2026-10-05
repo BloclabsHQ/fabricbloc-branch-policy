@@ -239,6 +239,18 @@ class TestDeterministicAutoApproveAllowlist(unittest.TestCase):
     def test_allowlisted_docs_only_passes(self):
         self.assertTrue(eligible({"docs/guide.md"}))
 
+    def test_svg_extension_denied_for_auto_approve(self):
+        self.assertFalse(eligible({"docs/diagram.svg"}))
+
+    def test_html_extension_denied_for_auto_approve(self):
+        self.assertFalse(eligible({"docs/page.html"}))
+
+    def test_htm_extension_denied_for_auto_approve(self):
+        self.assertFalse(eligible({"docs/page.htm"}))
+
+    def test_reviewers_json_has_no_dead_allowlist_globs(self):
+        self.assertNotIn("deterministic_auto_approve_allowlist", CFG)
+
     def test_review_route_blocks_even_if_under_docs(self):
         self.assertFalse(eligible({"docs/a.md", "iac/module/main.tf"}))
 
@@ -416,6 +428,9 @@ class TestAgentDeniedPathsCheck(unittest.TestCase):
         ga = {"id": GITHUB_ACTIONS_APP_ID, "slug": "github-actions"}
         self.assertTrue(check_run_from_github_actions({"app": ga}))
         self.assertFalse(check_run_from_github_actions({"app": {"id": 1, "slug": "evil"}}))
+        self.assertFalse(check_run_from_github_actions({
+            "app": {"id": 999, "slug": "github-actions"},
+        }))
 
     def test_agent_denied_paths_successful_reads_conclusion(self):
         import embedded_gate as eg
@@ -429,6 +444,19 @@ class TestAgentDeniedPathsCheck(unittest.TestCase):
             "id": 1,
         }])
         self.assertTrue(ok)
+
+    def test_github_actions_slug_without_app_id_15368_ignored(self):
+        import embedded_gate as eg
+
+        ok = self._run_check_runs(eg, [{
+            "name": "agent-denied-paths",
+            "status": "completed",
+            "conclusion": "success",
+            "app": {"id": 1, "slug": "github-actions"},
+            "started_at": "2026-10-05T12:00:00Z",
+            "id": 1,
+        }])
+        self.assertFalse(ok)
 
     def test_fake_app_success_ignored(self):
         import embedded_gate as eg
