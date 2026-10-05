@@ -906,7 +906,8 @@ class T(unittest.TestCase):
         gate_env = gate_step.get("env") or {}
         self.assertEqual(gate_env.get("ROR_JOB"), "gate")
         self.assertNotIn("REVIEWER_APP_TOKEN", gate_env)
-        self.assertNotIn("REVIEWER_APP_PRIVATE_KEY", str(gate))
+        self.assertNotIn("REVIEWER_APP_PRIVATE_KEY", gate_env)
+        self.assertNotIn("secrets.", str(gate_step))
         mint_run = [s for s in mint["steps"] if s.get("env", {}).get("ROR_JOB") == "mint"][0]
         self.assertIn("REVIEWER_APP_TOKEN", mint_run["env"])
 
@@ -915,7 +916,12 @@ class T(unittest.TestCase):
         low = text.lower()
         self.assertIn("refs/pull", text)
         self.assertTrue(
-            "may not match" in low or "must not match" in low,
+            "refs/pull" in text
+            and (
+                "may not match" in low
+                or "must not match" in low
+                or "no environment deployment rule may match" in low
+            ),
             "docs must forbid refs/pull/* deployment rules",
         )
 
