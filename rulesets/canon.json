@@ -16,7 +16,7 @@
     "_note": "Public source: a public workflow may run on any repository in the org, so no Actions 'Access' setting is needed."
   },
   "pins": {
-    "agent_gates_sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf",
+    "agent_gates_sha": "4c20081e3aa349eb82d6eeae79f8fd36bd34f6b7",
     "branch_name_guard_sha": "80ee4b19ad84f4cdb5dc1e923e19f54fc54a2c6a",
     "hygiene_sha": "06cfa0c886579256acdf260cc650f04bcb3371fe",
     "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit. issue_link_enforce_after: warn-only until this UTC instant; set org/repo var ISSUE_LINK_ENFORCE_AFTER to match before apply (var may only move earlier).",
@@ -37,7 +37,8 @@
           "include": [
             "fabricbloc",
             "context",
-            "keyflo-session-issuer"
+            "keyflo-session-issuer",
+            "fabric-wallet"
           ],
           "exclude": [],
           "protected": true
@@ -54,7 +55,7 @@
       },
       "bypass_actors": [],
       "_bypass_note": "Empty on purpose (decision F6-D2). No standing bypass on canon-agent-gates: break-glass is an org owner sets enforcement to Disabled (org audit log); fabricbloc cursor-env drift opens an issue while disabled. The gates pass at once for GOV-0022 human PRs to main, so nobody needs a bypass. An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
-      "_pull_request_note": "GOV-0033 D1 amended (PR-D2, Cris 2026-10-04 7:56 PM PT): one GitHub approving review on merge bases in ref_name.include. GitHub org rulesets cannot scope review count to agent head refs only — see docs/PR-D2-gov-0033-d1-amendment.md. Agent PRs: satisfied by fabricbloc-reviewer App (337673700) after PR-C verdict + agent-review-of-record. Human GOV-0022 PRs: gates skip (F6-D2/D3); any eligible human APPROVE satisfies the org count (not Cris-only). Repo rulesets (main-required-ci, etc.) keep required_approving_review_count: 0 on their pull_request blocks; org + repo rules aggregate on the same base ref.",
+      "_pull_request_note": "GOV-0033 D1 amended (PR-D2, Cris 2026-10-04 7:56 PM PT): one GitHub approving review on merge bases in ref_name.include. GitHub org rulesets cannot scope review count to agent head refs only \u2014 see docs/PR-D2-gov-0033-d1-amendment.md. Agent PRs: satisfied by fabricbloc-reviewer App (337673700) after PR-C verdict + agent-review-of-record. Human GOV-0022 PRs: gates skip (F6-D2/D3); any eligible human APPROVE satisfies the org count (not Cris-only). Repo rulesets (main-required-ci, etc.) keep required_approving_review_count: 0 on their pull_request blocks; org + repo rules aggregate on the same base ref.",
       "rules": [
         {
           "type": "workflows",
@@ -65,13 +66,19 @@
                 "repository_id": 1349282028,
                 "path": ".github/workflows/agent-denied-paths.yml",
                 "ref": "refs/heads/main",
-                "sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf"
+                "sha": "4c20081e3aa349eb82d6eeae79f8fd36bd34f6b7"
               },
               {
                 "repository_id": 1349282028,
                 "path": ".github/workflows/agent-review-of-record.yml",
                 "ref": "refs/heads/main",
-                "sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf"
+                "sha": "4c20081e3aa349eb82d6eeae79f8fd36bd34f6b7"
+              },
+              {
+                "repository_id": 1349282028,
+                "path": ".github/workflows/gate-issue-link.yml",
+                "ref": "refs/heads/main",
+                "sha": "4c20081e3aa349eb82d6eeae79f8fd36bd34f6b7"
               }
             ]
           }
@@ -86,7 +93,8 @@
             "required_review_thread_resolution": false
           }
         }
-      ]
+      ],
+      "_rollout_note": "PR-D (#51): fabric-wallet + gate-issue-link.yml. Org apply must use pins.agent_gates_sha that includes fabric-wallet in embedded_gate TARGET_REPOS (post\u2013#51 merge squash on main; not live ed19bdd alone). Batch with any #59 re-pin per Madgeniusblink 2026-10-04 hold note."
     },
     {
       "name": "canon-wallet-green-ci",
@@ -293,7 +301,7 @@
       "_repository": "fabricbloc",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B. Stops agents from creating a fresh ungated base branch (for example f6-gate-retarget-probe).",
-      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). dependabot/** is blocked until fabricbloc has dependabot.yml and a ruling re-adds the exemption. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). dependabot/** is blocked until fabricbloc has dependabot.yml and a ruling re-adds the exemption. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -329,7 +337,7 @@
       "_repository": "context",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B on BloclabsHQ/context (default branch main).",
-      "_comment": "Same shape as fabricbloc: block branch creation outside main, agent/**, and GOV-0022 handle paths. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Same shape as fabricbloc: block branch creation outside main, agent/**, and GOV-0022 handle paths. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -365,7 +373,7 @@
       "_repository": "keyflo-session-issuer",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B on BloclabsHQ/keyflo-session-issuer (default branch dev).",
-      "_comment": "Same as fabricbloc plus refs/heads/dev (repo default). Agent merge bases remain dev and main via canon-agent-gates. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Same as fabricbloc plus refs/heads/dev (repo default). Agent merge bases remain dev and main via canon-agent-gates. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -402,7 +410,7 @@
       "_repository": "fabricbloc",
       "name": "canon-deploy-branches-human-only",
       "_finding": "Finding (c). release/** and prod/** creation and direct updates are human-only (org admin break-glass).",
-      "_comment": "release/** and prod/** creation and direct updates are human-only. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "release/** and prod/** creation and direct updates are human-only. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
