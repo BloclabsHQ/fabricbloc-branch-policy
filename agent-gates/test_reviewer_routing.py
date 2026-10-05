@@ -99,6 +99,13 @@ class TestTwoTierDeniedPaths(unittest.TestCase):
             "cris_only",
         )
 
+    def test_nested_gov_adr_cris_only_manifest_arch_decisions_denied(self):
+        self.assertEqual(
+            classify_agent_path_tier(
+                "architecture/decisions/subdir/GOV-0001.md", MANIFEST_ARCH_DENIED),
+            "cris_only",
+        )
+
     def test_engine_non_test_py_cris_only(self):
         self.assertEqual(
             classify_agent_path_tier("agents/runtime/engine/runner.py", DENIED),

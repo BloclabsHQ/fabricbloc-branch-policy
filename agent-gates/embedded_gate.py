@@ -570,8 +570,10 @@ def path_is_gov_decision(path):
     rest = norm[len(ARCH_DECISIONS_PREFIX):]
     if not rest:
         return False
-    first = rest.split("/")[0]
-    return first.startswith("gov-")
+    for segment in rest.split("/"):
+        if segment.lower().startswith("gov-"):
+            return True
+    return False
 
 
 def path_is_engine_verdict_eligible(path):
