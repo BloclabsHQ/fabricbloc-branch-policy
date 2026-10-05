@@ -53,6 +53,7 @@
       },
       "bypass_actors": [],
       "_bypass_note": "Empty on purpose (decision F6-D2). No standing bypass on canon-agent-gates: break-glass is an org owner sets enforcement to Disabled (org audit log); fabricbloc cursor-env drift opens an issue while disabled. The gates pass at once for GOV-0022 human PRs to main, so nobody needs a bypass. An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
+      "_pull_request_note": "GOV-0033 D1 amended (PR-D2, Cris 2026-10-04 7:56 PM PT): one GitHub approving review on merge bases in ref_name.include. GitHub org rulesets cannot scope review count to agent head refs only — see docs/PR-D2-gov-0033-d1-amendment.md. Agent PRs: satisfied by fabricbloc-reviewer App (337673700) after PR-C verdict + agent-review-of-record. Human GOV-0022 PRs: gates skip (F6-D2/D3); any eligible human APPROVE satisfies the org count (not Cris-only). Repo rulesets (main-required-ci, etc.) keep required_approving_review_count: 0 on their pull_request blocks; org + repo rules aggregate on the same base ref.",
       "rules": [
         {
           "type": "workflows",
@@ -72,6 +73,16 @@
                 "sha": "1ddbd5bc04e4d7afa69be602aceede299774624d"
               }
             ]
+          }
+        },
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 1,
+            "dismiss_stale_reviews_on_push": true,
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": false
           }
         }
       ]
