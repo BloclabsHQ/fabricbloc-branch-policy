@@ -22,6 +22,8 @@
     "rulesets/**",
     "docs/adr/**",
     "docs/gov*/**",
+    "docs/gov-*.md",
+    "docs/decisions/**",
     "security.md",
     "**/security.md"
   ],

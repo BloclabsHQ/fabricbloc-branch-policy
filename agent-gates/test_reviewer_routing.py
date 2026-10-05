@@ -9,18 +9,21 @@ sys.path.insert(0, str(ROOT))
 
 from embedded_gate import (  # noqa: E402
     FLOOR_DENIED,
+    GITHUB_ACTIONS_APP_ID,
     REPO,
     VERDICT_RE,
     agent_denied_paths_successful,
     all_paths_eligible_for_auto,
     body_without_code_fences,
     changed_paths_from_files,
+    check_run_from_github_actions,
     classify_review_routes,
     deterministic_auto_approve_eligible,
     issue_comment_edited,
     is_trusted_verdict_author,
     parse_verdict_from_comments,
     path_eligible_for_auto_approve,
+    path_is_safe_for_auto_approve,
     try_reviewer_automation,
 )
 
@@ -248,6 +251,36 @@ class TestDeterministicAutoApproveAllowlist(unittest.TestCase):
     def test_fixture_data_allowlisted(self):
         self.assertTrue(eligible({"pkg/foo/testdata/input.json"}))
 
+    def test_runnable_under_docs_denied(self):
+        self.assertFalse(eligible({"docs/conf.py"}))
+        self.assertFalse(eligible({"docs/setup/script.sh"}))
+
+    def test_runnable_package_json_under_fixtures_denied(self):
+        self.assertFalse(eligible({"pkg/fixtures/package.json"}))
+
+    def test_exclusion_docs_gov_single_file(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "docs/GOV-0033.md", CFG, REPO, DENIED))
+
+    def test_exclusion_docs_decisions(self):
+        self.assertFalse(path_eligible_for_auto_approve(
+            "docs/decisions/0001-record.md", CFG, REPO, DENIED))
+
+    def test_unsafe_path_dotdot_denied(self):
+        self.assertFalse(path_is_safe_for_auto_approve("docs/../secrets/x.md"))
+
+    def test_unsafe_path_leading_slash_denied(self):
+        self.assertFalse(path_is_safe_for_auto_approve("/docs/x.md"))
+
+    def test_unsafe_path_leading_dot_slash_denied(self):
+        self.assertFalse(path_is_safe_for_auto_approve("./docs/x.md"))
+
+    def test_unsafe_path_backslash_denied(self):
+        self.assertFalse(path_is_safe_for_auto_approve("docs\\x.md"))
+
+    def test_unsafe_path_nul_denied(self):
+        self.assertFalse(path_is_safe_for_auto_approve("docs/x\0.md"))
+
     def test_sensitive_class_secrets(self):
         self.assertFalse(eligible({"secrets/registry.yaml"}))
 
@@ -354,15 +387,10 @@ class TestDeterministicAutoApproveAllowlist(unittest.TestCase):
 
 
 class TestAgentDeniedPathsCheck(unittest.TestCase):
-    def test_agent_denied_paths_successful_reads_conclusion(self):
-        import embedded_gate as eg
-
+    def _run_check_runs(self, eg, check_runs):
         class FakeResp:
-            def __init__(self, payload):
-                self._payload = payload
-
             def read(self):
-                return json.dumps(self._payload).encode()
+                return json.dumps({"check_runs": check_runs}).encode()
 
             def __enter__(self):
                 return self
@@ -370,25 +398,73 @@ class TestAgentDeniedPathsCheck(unittest.TestCase):
             def __exit__(self, *a):
                 pass
 
-        payloads = [{
-            "check_runs": [
-                {"name": "agent-denied-paths", "status": "completed", "conclusion": "success"},
-            ],
-        }]
-
         def fake_urlopen(req, timeout=30):
-            return FakeResp(payloads[0])
+            return FakeResp()
 
-        orig_api, orig_repo, orig_token = eg.API, eg.REPO, eg.TOKEN
+        orig_repo, orig_token = eg.REPO, eg.TOKEN
         eg.REPO = "BloclabsHQ/fabricbloc"
         eg.TOKEN = "test"
         orig_open = eg.urllib.request.urlopen
         eg.urllib.request.urlopen = fake_urlopen
         try:
-            self.assertTrue(agent_denied_paths_successful(HEAD))
+            return agent_denied_paths_successful(HEAD)
         finally:
             eg.urllib.request.urlopen = orig_open
-            eg.REPO, eg.TOKEN, eg.API = orig_repo, orig_token, orig_api
+            eg.REPO, eg.TOKEN = orig_repo, orig_token
+
+    def test_check_run_from_github_actions(self):
+        ga = {"id": GITHUB_ACTIONS_APP_ID, "slug": "github-actions"}
+        self.assertTrue(check_run_from_github_actions({"app": ga}))
+        self.assertFalse(check_run_from_github_actions({"app": {"id": 1, "slug": "evil"}}))
+
+    def test_agent_denied_paths_successful_reads_conclusion(self):
+        import embedded_gate as eg
+
+        ok = self._run_check_runs(eg, [{
+            "name": "agent-denied-paths",
+            "status": "completed",
+            "conclusion": "success",
+            "app": {"id": GITHUB_ACTIONS_APP_ID, "slug": "github-actions"},
+            "started_at": "2026-10-05T12:00:00Z",
+            "id": 1,
+        }])
+        self.assertTrue(ok)
+
+    def test_fake_app_success_ignored(self):
+        import embedded_gate as eg
+
+        ok = self._run_check_runs(eg, [{
+            "name": "agent-denied-paths",
+            "status": "completed",
+            "conclusion": "success",
+            "app": {"id": 999, "slug": "fake-bot"},
+            "started_at": "2026-10-05T12:00:00Z",
+            "id": 1,
+        }])
+        self.assertFalse(ok)
+
+    def test_stale_fake_success_newer_github_actions_failure(self):
+        import embedded_gate as eg
+
+        ok = self._run_check_runs(eg, [
+            {
+                "name": "agent-denied-paths",
+                "status": "completed",
+                "conclusion": "success",
+                "app": {"id": 999, "slug": "fake-bot"},
+                "started_at": "2026-10-05T11:00:00Z",
+                "id": 1,
+            },
+            {
+                "name": "agent-denied-paths",
+                "status": "completed",
+                "conclusion": "failure",
+                "app": {"id": GITHUB_ACTIONS_APP_ID, "slug": "github-actions"},
+                "started_at": "2026-10-05T12:00:00Z",
+                "id": 2,
+            },
+        ])
+        self.assertFalse(ok)
 
     def test_mode_empty_string_fails_closed(self):
         import os

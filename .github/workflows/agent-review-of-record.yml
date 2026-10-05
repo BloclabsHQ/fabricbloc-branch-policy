@@ -170,6 +170,21 @@ jobs:
           MAX_COMMITS = 250  # pulls/{n}/commits hard limit
           MAX_COMMIT_PULLS = 500  # commits/{sha}/pulls hard limit
           CANON_AGENT_GATES = "canon-agent-gates"
+          GITHUB_ACTIONS_APP_ID = 15368
+          AUTO_APPROVE_DOCS_EXTENSIONS = frozenset({
+              ".md", ".txt", ".rst", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp",
+          })
+          AUTO_APPROVE_FIXTURE_EXTENSIONS = AUTO_APPROVE_DOCS_EXTENSIONS | {".json", ".yaml", ".yml"}
+          RUNNABLE_BASENAMES = frozenset({
+              "makefile", "package.json", "package-lock.json", "conf.py", "setup.py",
+              "pyproject.toml", "cargo.toml", "go.mod", "dockerfile", "docker-compose.yml",
+              "docker-compose.yaml", "cmakelists.txt", "gemfile", "rakefile",
+          })
+          RUNNABLE_SUFFIXES = (
+              ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".sh", ".bash", ".ps1",
+              ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".cpp", ".h", ".hpp",
+              ".wasm", ".exe", ".bat", ".cmd", ".pl", ".pm", ".lua", ".vue", ".svelte",
+          )
           API = os.environ.get("API", "https://api.github.com").rstrip("/")
           TOKEN = os.environ.get("GH_TOKEN", "")
           MODE = os.environ.get("MODE", "")
@@ -608,14 +623,62 @@ jobs:
               return False
 
 
-          def path_on_auto_approve_allowlist(path, cfg):
-              allow = cfg.get("deterministic_auto_approve_allowlist") or []
-              if not allow:
+          def path_is_safe_for_auto_approve(path):
+              if not path:
                   return False
-              return any(path_matches_glob_ci(path, g) for g in allow)
+              if "\x00" in path:
+                  return False
+              if "\\" in path:
+                  return False
+              if path.startswith("/") or path.startswith("./"):
+                  return False
+              parts = path.replace("\\", "/").split("/")
+              if ".." in parts:
+                  return False
+              return True
+
+
+          def auto_approve_path_zone(path):
+              norm = normalize_repo_path(path)
+              if norm.startswith("docs/"):
+                  return "docs"
+              parts = norm.split("/")
+              if "fixtures" in parts:
+                  return "fixtures"
+              if "testdata" in parts:
+                  return "testdata"
+              return None
+
+
+          def path_is_runnable_artifact(path):
+              norm = normalize_repo_path(path)
+              base = norm.rsplit("/", 1)[-1]
+              if base in RUNNABLE_BASENAMES:
+                  return True
+              return any(norm.endswith(sfx) for sfx in RUNNABLE_SUFFIXES)
+
+
+          def path_on_auto_approve_allowlist(path, cfg):
+              del cfg  # extension + zone policy is pinned in gate code
+              if not path_is_safe_for_auto_approve(path):
+                  return False
+              if path_is_runnable_artifact(path):
+                  return False
+              zone = auto_approve_path_zone(path)
+              if not zone:
+                  return False
+              _root, ext = os.path.splitext(normalize_repo_path(path))
+              ext = ext.lower()
+              if not ext:
+                  return False
+              if zone == "docs":
+                  return ext in AUTO_APPROVE_DOCS_EXTENSIONS
+              return ext in AUTO_APPROVE_FIXTURE_EXTENSIONS
 
 
           def path_eligible_for_auto_approve(path, cfg, repo_full, denied_entries):
+              if not path_is_safe_for_auto_approve(path):
+                  return False
               if path_matches_auto_approve_exclusion(path, cfg):
                   return False
               if path_matches_any_review_route(path, cfg, repo_full):
@@ -736,9 +799,19 @@ jobs:
               return parse_verdict_from_comments(comments, head, expected_reviewer, excluded_logins, cfg)
 
 
+          def check_run_from_github_actions(run):
+              app = run.get("app") or {}
+              try:
+                  app_id = int(app.get("id") or 0)
+              except (TypeError, ValueError):
+                  app_id = 0
+              slug = (app.get("slug") or "").lower()
+              return app_id == GITHUB_ACTIONS_APP_ID or slug == "github-actions"
+
+
           def agent_denied_paths_successful(head):
+              ga_runs = []
               page = 1
-              found = False
               while True:
                   batch = call(
                       f"/repos/{REPO}/commits/{head}/check-runs?per_page=100&page={page}"
@@ -749,14 +822,19 @@ jobs:
                   for r in runs:
                       if r.get("name") != "agent-denied-paths":
                           continue
-                      found = True
-                      if r.get("status") != "completed":
-                          return False
-                      return r.get("conclusion") == "success"
+                      if not check_run_from_github_actions(r):
+                          continue
+                      ga_runs.append(r)
                   if len(runs) < 100:
                       break
                   page += 1
-              return False
+              if not ga_runs:
+                  return False
+              ga_runs.sort(key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
+              newest = ga_runs[-1]
+              if newest.get("status") != "completed":
+                  return False
+              return newest.get("conclusion") == "success"
 
 
           def post_issue_comment(number, body, token=None):
@@ -1001,6 +1079,11 @@ jobs:
                   if changed_n > MAX_FILES:
                       fail(f"PR changes {changed_n} files (> {MAX_FILES}); cannot list them all")
                   files = paginate(f"/repos/{REPO}/pulls/{number}/files", MAX_FILES)
+                  if len(files) != changed_n:
+                      fail(
+                          f"file count mismatch (PR says {changed_n}, listed {len(files)}); "
+                          "failing closed before auto-approve"
+                      )
                   paths = changed_paths_from_files(files)
                   cfg = load_reviewers_config()
                   excluded_logins = set(excluded)
