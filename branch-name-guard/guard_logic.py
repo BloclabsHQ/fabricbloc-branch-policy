@@ -114,7 +114,8 @@ def ref_is_on_main_history(policy_repo, token, ref):
         data = api_get_json(f"/repos/{policy_repo}/compare/{base}...{head}", token)
     except urllib.error.HTTPError:
         return False
-    return (data or {}).get("status") in ("behind", "identical")
+    # base=pin, head=main: ancestor pin yields status "ahead" (main is ahead of pin).
+    return (data or {}).get("status") in ("ahead", "identical")
 
 
 def fetch_bots_json_at_ref(policy_repo, token, ref):
