@@ -699,6 +699,12 @@ class T(unittest.TestCase):
         setup(files=("docs/x.md",), reviews=[approve("randomuser")], **AGENT)
         self.assertEqual(run("agent-review-of-record")[0], 1)
 
+    def test_review_file_count_mismatch_fails_before_auto_approve(self):
+        setup(files=("docs/guide.md",), changed=99, reviews=[], **AGENT)
+        code, out = run("agent-review-of-record")
+        self.assertEqual(code, 1, out)
+        self.assertIn("file count mismatch", out)
+
     def test_hostile_branch_name_is_inert(self):
         setup(ref='agent/x";$(touch /tmp/pwned);"', files=("docs/x.md",), atype="Bot", author="fabricbloc-agent-ops[bot]")
         run("agent-denied-paths")
