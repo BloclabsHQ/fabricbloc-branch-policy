@@ -60,8 +60,8 @@ jobs:
           # and agent-gates/test.py enforce that). It never checks out or executes pull-request code:
           # every input is the event payload plus GitHub REST reads of the PR and of the BASE
           # commit. Python stdlib only. Any API error or ambiguity fails closed.
+          import fnmatch
           import json, os, re, sys, urllib.error, urllib.parse, urllib.request
-
           SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
           TARGET_REPOS = {
               "BloclabsHQ/fabricbloc",
@@ -114,6 +114,15 @@ jobs:
           REVIEWER_APP_BOTS = {("fabricbloc-reviewer[bot]", 337673700)}
           APPROVAL_REF_RE = re.compile(
               r"approval-ref:\s*(slack:\d+\.\d+|cli:[A-Za-z0-9._-]{6,64})")
+          VERDICT_RE = re.compile(
+              r"<!--\s*fb-verdict:\s*PASS\s+reviewer=(?P<reviewer>[a-z0-9-]+)\s+"
+              r"sha=(?P<sha>[0-9a-f]{40})\s*-->",
+              re.IGNORECASE,
+          )
+          CODE_FENCE_RE = re.compile(r"```(?:[^\n]*\n)?.*?```", re.DOTALL)
+          REVIEWERS_JSON = "rulesets/reviewers.json"
+          CANON_JSON = "rulesets/canon.json"
+          MAX_ISSUE_COMMENTS = 10000
           HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
           _BOT_TYPES = "feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style"
           _BOT_SLUG = r"[a-z0-9]+(-[a-z0-9]+)+"
@@ -185,10 +194,16 @@ jobs:
               return True, None
 
 
-          def call(path, accept="application/vnd.github+json", allow_404=False):
-              req = urllib.request.Request(API + path, headers={
-                  "Authorization": f"Bearer {TOKEN}", "Accept": accept,
-                  "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "fabricbloc-agent-gates"})
+          def call(path, accept="application/vnd.github+json", allow_404=False, method="GET", body=None, token=None):
+              tok = TOKEN if token is None else token
+              headers = {
+                  "Authorization": f"Bearer {tok}", "Accept": accept,
+                  "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "fabricbloc-agent-gates"}
+              data = None
+              if body is not None:
+                  data = json.dumps(body).encode()
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(API + path, data=data, method=method, headers=headers)
               try:
                   with urllib.request.urlopen(req, timeout=30) as resp:
                       body = resp.read().decode()
@@ -480,7 +495,330 @@ jobs:
               return False
 
 
+          def policy_repo_file(path, ref):
+              q = urllib.parse.quote(path)
+              raw = call(
+                  f"/repos/{SELF_REPO}/contents/{q}?ref={ref}",
+                  accept="application/vnd.github.raw",
+                  allow_404=True,
+              )
+              if raw is None:
+                  fail(f"missing policy file {path} on {SELF_REPO}@{ref[:12]}")
+              try:
+                  return json.loads(raw)
+              except ValueError:
+                  fail(f"{path} on {SELF_REPO}@{ref[:12]} is not valid JSON")
+
+
+          def policy_reviewers_ref():
+              canon = policy_repo_file(CANON_JSON, "main")
+              ref = (canon.get("pins") or {}).get("agent_gates_sha") or "main"
+              return ref.strip() or "main"
+
+
+          def load_reviewers_config():
+              """Never read reviewers.json from the PR head; use pinned policy SHA or main."""
+              ref = policy_reviewers_ref()
+              return policy_repo_file(REVIEWERS_JSON, ref)
+
+
+          def normalize_repo_path(path):
+              return (path or "").replace("\\", "/").lower()
+
+
+          def path_matches_glob(path, pattern):
+              if "**" in pattern:
+                  if pattern.startswith("**/"):
+                      return fnmatch.fnmatch(path, pattern[3:]) or fnmatch.fnmatch(
+                          path, pattern.replace("**/", "*/", 1)
+                      )
+                  return fnmatch.fnmatch(path, pattern.replace("**", "*"))
+              return fnmatch.fnmatch(path, pattern)
+
+
+          def path_matches_glob_ci(path, pattern):
+              return path_matches_glob(normalize_repo_path(path), normalize_repo_path(pattern))
+
+
+          def changed_paths_from_files(files):
+              paths = set()
+              for f in files:
+                  name = f.get("filename")
+                  if name:
+                      paths.add(name)
+                  prev = f.get("previous_filename")
+                  if prev:
+                      paths.add(prev)
+              return paths
+
+
+          def denied_path_globs(manifest):
+              dp = (manifest or {}).get("denied_paths") or {}
+              denied = list(FLOOR_DENIED) + list(dp.get("arch_0048_baseline") or [])
+              if INCLUDE_PROPOSED:
+                  denied += list(dp.get("proposed_additions") or [])
+              return denied
+
+
+          def path_matches_denied_entry(path, entry):
+              norm = normalize_repo_path(path)
+              e = normalize_repo_path(entry)
+              if e.endswith("/"):
+                  return norm.startswith(e) or norm == e.rstrip("/")
+              return norm == e or norm.startswith(e + "/")
+
+
+          def path_matches_denied(path, denied_entries):
+              return any(path_matches_denied_entry(path, e) for e in (denied_entries or []))
+
+
+          def path_matches_auto_approve_exclusion(path, cfg):
+              for pattern in cfg.get("deterministic_auto_approve_exclusions") or []:
+                  if path_matches_glob_ci(path, pattern):
+                      return True
+              return False
+
+
+          def path_matches_any_review_route(path, cfg, repo_full):
+              short = repo_full.split("/", 1)[-1] if "/" in repo_full else repo_full
+              for route in cfg.get("routes") or []:
+                  repos = route.get("repos")
+                  if repos and short not in repos:
+                      continue
+                  for g in route.get("path_globs") or []:
+                      if path_matches_glob_ci(path, g):
+                          return True
+              return False
+
+
+          def path_on_auto_approve_allowlist(path, cfg):
+              allow = cfg.get("deterministic_auto_approve_allowlist") or []
+              if not allow:
+                  return False
+              return any(path_matches_glob_ci(path, g) for g in allow)
+
+
+          def path_eligible_for_auto_approve(path, cfg, repo_full, denied_entries):
+              if path_matches_auto_approve_exclusion(path, cfg):
+                  return False
+              if path_matches_any_review_route(path, cfg, repo_full):
+                  return False
+              if path_matches_denied(path, denied_entries):
+                  return False
+              return path_on_auto_approve_allowlist(path, cfg)
+
+
+          def all_paths_eligible_for_auto(paths, cfg, repo_full, denied_entries):
+              if not paths:
+                  return False
+              return all(
+                  path_eligible_for_auto_approve(p, cfg, repo_full, denied_entries) for p in paths
+              )
+
+
+          def deterministic_auto_approve_eligible(paths, cfg, head, denied_entries):
+              if not all_paths_eligible_for_auto(paths, cfg, REPO, denied_entries):
+                  return False
+              return agent_denied_paths_successful(head)
+
+
+          def classify_review_routes(repo_full, paths, cfg):
+              short = repo_full.split("/", 1)[-1] if "/" in repo_full else repo_full
+              default = cfg.get("default_reviewer") or "madagentpm"
+              reviewer = default
+              cris = False
+              sensitive = False
+              matched = False
+              best_prio = -1
+              for route in cfg.get("routes") or []:
+                  repos = route.get("repos")
+                  if repos and short not in repos:
+                      continue
+                  globs = route.get("path_globs") or []
+                  if not globs:
+                      continue
+                  prio = int(route.get("priority") or 0)
+                  route_hit = False
+                  for p in paths:
+                      if any(path_matches_glob_ci(p, g) for g in globs):
+                          route_hit = True
+                          break
+                  if not route_hit:
+                      continue
+                  if prio >= best_prio:
+                      best_prio = prio
+                      matched = True
+                      reviewer = route.get("reviewer") or default
+                      cris = bool(route.get("cris_required"))
+                      sensitive = bool(route.get("sensitive")) or cris or reviewer != default
+              return reviewer, cris, sensitive, matched
+
+
+          def trusted_verdict_identities(cfg):
+              out = set()
+              for entry in cfg.get("trusted_verdict_identities") or []:
+                  if not isinstance(entry, dict):
+                      continue
+                  login = (entry.get("login") or "").strip().lower()
+                  uid = entry.get("user_id")
+                  if login and uid is not None:
+                      try:
+                          out.add((login, int(uid)))
+                      except (TypeError, ValueError):
+                          continue
+              return out
+
+
+          def is_trusted_verdict_author(user, cfg):
+              login = ((user or {}).get("login") or "").strip().lower()
+              uid = (user or {}).get("id")
+              if not login or uid is None:
+                  return False
+              try:
+                  uid = int(uid)
+              except (TypeError, ValueError):
+                  return False
+              return (login, uid) in trusted_verdict_identities(cfg)
+
+
+          def body_without_code_fences(text):
+              return CODE_FENCE_RE.sub("", text or "")
+
+
+          def issue_comment_edited(c):
+              return (c.get("created_at") or "") != (c.get("updated_at") or "")
+
+
+          def parse_verdict_from_comments(comments, head, expected_reviewer, excluded_logins, cfg):
+              """Trusted PASS markers only outside fences; login+id; not from PR participants."""
+              if not cfg.get("verdict_approval_enabled"):
+                  return None, None
+              expected = (expected_reviewer or "").lower()
+              excluded = {x.lower() for x in excluded_logins if x}
+              for c in reversed(comments):
+                  if issue_comment_edited(c):
+                      continue
+                  user = c.get("user") or {}
+                  login = (user.get("login") or "").lower()
+                  if login in excluded:
+                      continue
+                  if not is_trusted_verdict_author(user, cfg):
+                      continue
+                  body = body_without_code_fences(c.get("body") or "")
+                  m = VERDICT_RE.search(body)
+                  if not m or m.group("sha") != head:
+                      continue
+                  if m.group("reviewer").lower() != expected:
+                      continue
+                  return expected, login
+              return None, None
+
+
+          def find_trusted_verdict(number, head, expected_reviewer, excluded_logins, cfg):
+              comments = paginate(f"/repos/{REPO}/issues/{number}/comments", MAX_ISSUE_COMMENTS)
+              return parse_verdict_from_comments(comments, head, expected_reviewer, excluded_logins, cfg)
+
+
+          def agent_denied_paths_successful(head):
+              page = 1
+              found = False
+              while True:
+                  batch = call(
+                      f"/repos/{REPO}/commits/{head}/check-runs?per_page=100&page={page}"
+                  )
+                  if not isinstance(batch, dict):
+                      fail("unexpected API shape for commits/check-runs")
+                  runs = batch.get("check_runs") or []
+                  for r in runs:
+                      if r.get("name") != "agent-denied-paths":
+                          continue
+                      found = True
+                      if r.get("status") != "completed":
+                          return False
+                      return r.get("conclusion") == "success"
+                  if len(runs) < 100:
+                      break
+                  page += 1
+              return False
+
+
+          def post_issue_comment(number, body, token=None):
+              call(
+                  f"/repos/{REPO}/issues/{number}/comments",
+                  method="POST",
+                  body={"body": body},
+                  token=token,
+              )
+
+
+          def submit_reviewer_app_approve(number, head, app_token, reviewer_slug):
+              body = (
+                  f"Auto-approval from agent verdict (reviewer={reviewer_slug}).\n\n"
+                  f"{head}\n"
+                  f"approval-ref: cli:verdict-auto\n"
+              )
+              call(
+                  f"/repos/{REPO}/pulls/{number}/reviews",
+                  method="POST",
+                  body={"commit_id": head, "body": body, "event": "APPROVE"},
+                  token=app_token,
+              )
+
+
+          def try_reviewer_automation(number, head, paths, cfg, excluded_logins, denied_entries):
+              reviewer, cris, sensitive, _matched = classify_review_routes(REPO, paths, cfg)
+              default = cfg.get("default_reviewer") or "madagentpm"
+              if cris:
+                  post_issue_comment(
+                      number,
+                      f"<!-- fb-routing: cris-required -->\n"
+                      f"@madgeniusblink Cris review required (prod/IAM/secrets class). "
+                      f"Routed reviewer: `{reviewer}`.",
+                  )
+                  fail("cris_required path class; App auto-approve blocked")
+              app_token = os.environ.get("REVIEWER_APP_TOKEN", "").strip()
+              deterministic = deterministic_auto_approve_eligible(paths, cfg, head, denied_entries)
+              if deterministic and app_token:
+                  submit_reviewer_app_approve(number, head, app_token, reviewer)
+                  print(f"{MODE}: App APPROVE (deterministic: gates green, default route `{reviewer}`)")
+                  return True
+              if deterministic and not app_token:
+                  print(
+                      f"{MODE}: deterministic auto-approve eligible but REVIEWER_APP_TOKEN unset; "
+                      "skipping App approval (configure REVIEWER_APP_PRIVATE_KEY when ready)"
+                  )
+              verdict_reviewer, verdict_author = find_trusted_verdict(
+                  number, head, reviewer, excluded_logins, cfg)
+              if verdict_reviewer and app_token:
+                  submit_reviewer_app_approve(number, head, app_token, verdict_reviewer)
+                  print(
+                      f"{MODE}: App APPROVE submitted from trusted verdict by {verdict_author} "
+                      f"(reviewer={verdict_reviewer})"
+                  )
+                  return True
+              if verdict_reviewer and not app_token:
+                  print(
+                      f"{MODE}: trusted PASS verdict present but REVIEWER_APP_TOKEN unset; "
+                      "skipping App approval (configure REVIEWER_APP_PRIVATE_KEY when ready)"
+                  )
+              post_issue_comment(
+                  number,
+                  f"<!-- fb-routing: needs-review reviewer={reviewer} -->\n"
+                  f"Agent reviewer route: `{reviewer}`. "
+                  + (
+                      "Verdict-based App approval is disabled (`verdict_approval_enabled: false`). "
+                      if not cfg.get("verdict_approval_enabled")
+                      else f"Post PASS verdict `<!-- fb-verdict: PASS reviewer={reviewer} sha={head} -->` "
+                           "from a trusted non-participant identity, "
+                  )
+                  + "or address gate findings.",
+              )
+              return False
+
+
           def main():
+              if not (MODE or "").strip():
+                  fail("MODE is unset; workflow must set MODE")
               if MODE not in ("agent-denied-paths", "agent-review-of-record"):
                   fail(f"unknown MODE {MODE!r}")
               if not TOKEN.strip():
@@ -642,9 +980,33 @@ jobs:
               ok = sorted(l for l, r in latest.items()
                           if approval_qualifies(r, head, allow, excluded, reviewer_bots))
               if not ok:
-                  fail(f"no allowlisted, independent APPROVE at head {head[:12]}; a new push needs a new review, then re-run this check")
+                  changed_n = int(pr.get("changed_files") or 0)
+                  if changed_n > MAX_FILES:
+                      fail(f"PR changes {changed_n} files (> {MAX_FILES}); cannot list them all")
+                  files = paginate(f"/repos/{REPO}/pulls/{number}/files", MAX_FILES)
+                  paths = changed_paths_from_files(files)
+                  cfg = load_reviewers_config()
+                  excluded_logins = set(excluded)
+                  if author:
+                      excluded_logins.add(author)
+                  denied_globs = denied_path_globs(manifest)
+                  if try_reviewer_automation(number, head, paths, cfg, excluded_logins, denied_globs):
+                      reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
+                      latest = {}
+                      for r in reviews:
+                          login = (r.get("user") or {}).get("login")
+                          if login and r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+                              latest[login] = r
+                      ok = sorted(l for l, r in latest.items()
+                                  if approval_qualifies(r, head, allow, excluded, reviewer_bots))
+                  if not ok:
+                      fail(
+                          f"no allowlisted, independent APPROVE at head {head[:12]}; "
+                          "a new push needs a new review, then re-run this check"
+                      )
               print(f"{MODE}: approved at {head[:12]} by {ok}")
 
 
-          main()
+          if "MODE" in os.environ:
+              main()
           PY

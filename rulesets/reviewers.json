@@ -1,0 +1,109 @@
+{
+  "_comment": "Fallback routing when fabricbloc-reviewer App cannot auto-approve. Path globs use fnmatch (** supported). Highest priority wins.",
+  "verdict_approval_enabled": false,
+  "default_reviewer": "madagentpm",
+  "deterministic_auto_approve_allowlist": [
+    "docs/**",
+    "**/fixtures/**",
+    "**/testdata/**"
+  ],
+  "deterministic_auto_approve_exclusions": [
+    ".github/**",
+    ".cursor/**",
+    ".claude/**",
+    ".codex/**",
+    "**/agents.md",
+    "**/claude.md",
+    "**/.cursorrules",
+    "**/skill.md",
+    "codeowners",
+    "**/codeowners",
+    "canon/**",
+    "rulesets/**",
+    "docs/adr/**",
+    "docs/gov*/**",
+    "security.md",
+    "**/security.md"
+  ],
+  "trusted_verdict_identities": [
+    {
+      "login": "madgeniusblink",
+      "user_id": 42707764
+    },
+    {
+      "login": "cursoragent",
+      "user_id": 199161495
+    }
+  ],
+  "routes": [
+    {
+      "id": "cris-prod-iam-secrets",
+      "priority": 300,
+      "path_globs": [
+        "secrets/**",
+        "**/secrets/**",
+        "**/iam/**",
+        "**/prod/**"
+      ],
+      "reviewer": "madagentpm",
+      "cris_required": true,
+      "sensitive": true
+    },
+    {
+      "id": "fabricbloc-src-auth",
+      "priority": 260,
+      "path_globs": [
+        "src/auth/**"
+      ],
+      "reviewer": "sentinel",
+      "sensitive": true
+    },
+    {
+      "id": "fabric-wallet-sensitive",
+      "priority": 250,
+      "repos": [
+        "fabric-wallet"
+      ],
+      "path_globs": [
+        "**/auth/**",
+        "**/crypto/**",
+        "**/secrets/**"
+      ],
+      "reviewer": "sentinel",
+      "sensitive": true
+    },
+    {
+      "id": "auth-crypto-any-repo",
+      "priority": 240,
+      "path_globs": [
+        "**/auth/**",
+        "**/crypto/**"
+      ],
+      "reviewer": "sentinel",
+      "sensitive": true
+    },
+    {
+      "id": "policy-workflows",
+      "priority": 230,
+      "path_globs": [
+        ".github/workflows/**",
+        "rulesets/**",
+        "policy/**",
+        "**/canon.json"
+      ],
+      "reviewer": "warden",
+      "sensitive": true
+    },
+    {
+      "id": "iac-infra",
+      "priority": 220,
+      "path_globs": [
+        "iac/**",
+        "infra/**",
+        "**/*.tf"
+      ],
+      "reviewer": "aether",
+      "sensitive": true
+    }
+  ]
+}
