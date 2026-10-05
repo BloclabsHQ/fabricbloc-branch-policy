@@ -657,6 +657,7 @@ class T(unittest.TestCase):
                 "BloclabsHQ/fabricbloc",
                 "BloclabsHQ/context",
                 "BloclabsHQ/keyflo-session-issuer",
+                "BloclabsHQ/fabric-wallet",
             },
         )
 

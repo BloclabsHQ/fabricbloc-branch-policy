@@ -10,6 +10,7 @@ TARGET_REPOS = {
     "BloclabsHQ/fabricbloc",
     "BloclabsHQ/context",
     "BloclabsHQ/keyflo-session-issuer",
+    "BloclabsHQ/fabric-wallet",
 }
 DEFAULT_BASE_REF = "main"
 MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
