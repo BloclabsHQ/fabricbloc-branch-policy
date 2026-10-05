@@ -42,7 +42,7 @@ Recorded deltas so cursor-env / manual audits do not treat intentional live stat
 
 | Live ruleset | ID | Note |
 |---|---|---|
-| `canon-agent-gates` (org) | 24445414 | **Active**, no bypass. Repos: `fabricbloc`, `context`, `keyflo-session-issuer`. `ref_name.include` matches canon (four entries). Live workflow refs @ `1ddbd5bc04e4d7afa69be602aceede299774624d`, matching canon (applied and reload-verified **2026-10-04 PT**, MadAgentPM). Retarget applied **2026-10-04 PT** (MadAgentPM). |
+| `canon-agent-gates` (org) | 24445414 | **Active**, no bypass. Repos: `fabricbloc`, `context`, `keyflo-session-issuer`. `ref_name.include` matches canon (four entries). Live workflow refs @ `1ddbd5bc04e4d7afa69be602aceede299774624d` until org ruleset **24445414** is updated to `ed19bddc0c79cd96349ec88a317a80b6743e61cf` (canon after #57 / post–#57 re-pin PR). Retarget applied **2026-10-04 PT** (MadAgentPM). |
 | `main-required-ci` (fabricbloc) | 20436874 | **Require branches to be up to date before merging** is **OFF**, matching `canon.json` `strict_required_status_checks_policy: false`. The **six** required status check contexts are unchanged from the pre-toggle set. **Merge queue** is not available on GitHub Team for private repos (documented limitation; not in canon). |
 
 **Policy ownership:** Changes to org gate targeting (`TARGET_REPOS` in `agent-gates/embedded_gate.py`, `canon-agent-gates` `repository_name` in `canon.json`) are owned by **Warden** (FabricBloc tech-policy owner bot). Human CODEOWNERS review stays unchanged.

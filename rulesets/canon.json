@@ -16,7 +16,7 @@
     "_note": "Public source: a public workflow may run on any repository in the org, so no Actions 'Access' setting is needed."
   },
   "pins": {
-    "agent_gates_sha": "1ddbd5bc04e4d7afa69be602aceede299774624d",
+    "agent_gates_sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf",
     "branch_name_guard_sha": "e8a5985f5ebf7b3795716b29fb3778e9842a3e25",
     "hygiene_sha": "1ddbd5bc04e4d7afa69be602aceede299774624d",
     "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit. issue_link_enforce_after: warn-only until this UTC instant; set org/repo var ISSUE_LINK_ENFORCE_AFTER to match before apply (var may only move earlier).",
@@ -65,13 +65,13 @@
                 "repository_id": 1349282028,
                 "path": ".github/workflows/agent-denied-paths.yml",
                 "ref": "refs/heads/main",
-                "sha": "1ddbd5bc04e4d7afa69be602aceede299774624d"
+                "sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf"
               },
               {
                 "repository_id": 1349282028,
                 "path": ".github/workflows/agent-review-of-record.yml",
                 "ref": "refs/heads/main",
-                "sha": "1ddbd5bc04e4d7afa69be602aceede299774624d"
+                "sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf"
               }
             ]
           }
