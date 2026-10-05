@@ -1,14 +1,14 @@
 # fabric-wallet: green CI before merge and deploy
 
-**Policy repo only.** This file is documentation for changes in `BloclabsHQ/fabric-wallet` after Cris approves and applies org ruleset `canon-wallet-green-ci` from `rulesets/canon.json`.
+**Policy repo only.** This file is documentation for changes in `BloclabsHQ/fabric-wallet` alongside org ruleset `canon-wallet-green-ci` from `rulesets/canon.json`.
 
 ## Incident context
 
 PRs **#1433** and **#1435** merged into `dev` while CI was red or still running. **#1433** shipped a GORM regression to the dev ECS environment (~05:46 PT, 2026-10-04). The **Dev CI/CD Pipeline** (`.github/workflows/cicd.yaml`, job `build-and-deploy`) runs on push to `dev` and does not run tests.
 
-## Org ruleset (canon draft)
+## Org ruleset (live)
 
-Org ruleset **`canon-wallet-green-ci`** (founder yes **WALLET-GREEN-CI** recorded 2026-10-05 01:01 PT; apply after policy PR **#47** merges):
+Org ruleset **`canon-wallet-green-ci`** (founder yes **WALLET-GREEN-CI** recorded 2026-10-05 01:01 PT; policy PR **#47** merged **`06cfa0c`**; live org ruleset **24489464**, **Active** on `fabric-wallet`, applied **2026-10-05 PT** by MadGeniusBot):
 
 | Item | Value |
 |---|---|
@@ -23,26 +23,24 @@ Org ruleset **`canon-wallet-green-ci`** (founder yes **WALLET-GREEN-CI** recorde
 
 ## Deploy gate (reusable workflow)
 
-Pin `hygiene-deploy-green-gate.yml` at `rulesets/canon.json` → `pins.hygiene_sha` after the policy-repo change merges and is re-pinned.
+Pin `hygiene-deploy-green-gate.yml` at `rulesets/canon.json` → `pins.hygiene_sha` (**`06cfa0c886579256acdf260cc650f04bcb3371fe`**, includes C7 deploy gate).
 
 Before `build-and-deploy`, verify the **merged PR head** had green checks (fail closed if no merged PR or checks missing/failed). Default required checks for deploy: `Lint`, `Security Scan`, `Test` (subset of merge gate).
 
 ### Ready-to-paste: `cicd.yaml` caller snippet
 
-Add a job **before** `build-and-deploy` (adjust pin SHA after hygiene re-pin):
+Add a job **before** `build-and-deploy`:
 
 ```yaml
   verify-ci-green:
-    runs-on: ubuntu-latest
+    uses: BloclabsHQ/fabricbloc-branch-policy/.github/workflows/hygiene-deploy-green-gate.yml@06cfa0c886579256acdf260cc650f04bcb3371fe
     permissions:
       actions: read
       contents: read
       pull-requests: read
-    steps:
-      - uses: BloclabsHQ/fabricbloc-branch-policy/.github/workflows/hygiene-deploy-green-gate.yml@<pins.hygiene_sha>
-        with:
-          commit_sha: ${{ github.sha }}
-          required_checks: '["Lint","Security Scan","Test"]'
+    with:
+      commit_sha: ${{ github.sha }}
+      required_checks: '["Lint","Security Scan","Test"]'
 
   build-and-deploy:
     needs: verify-ci-green
