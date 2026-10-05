@@ -5,21 +5,33 @@ import os
 import re
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
 SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
+ORG_OWNER = "BloclabsHQ"
 DEPENDABOT = "dependabot[bot]"
 NO_ISSUE_LABEL = "no-issue"
 NO_ISSUE_LABELER = "madgeniusblink"
-CLOSING_RE = re.compile(
-    r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b"
+# Embedded from rulesets/canon.json → pins.issue_link_enforce_after (re-pin when canon moves).
+CANON_ISSUE_LINK_ENFORCE_AFTER = "2026-10-07T03:00:00Z"
+# Optional extra cross-repo targets (full names); any BloclabsHQ/* is allowed by default.
+ISSUE_LINK_CROSS_REPO_ALLOWLIST = frozenset()
+CLOSING_KEYWORD = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
+CLOSING_SAME_REPO_RE = re.compile(
+    rf"(?i)\b{CLOSING_KEYWORD}\s*:?\s*#(\d+)\b"
 )
-CROSS_REPO_RE = re.compile(r"\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)\b")
+CLOSING_CROSS_REPO_RE = re.compile(
+    rf"(?i)\b{CLOSING_KEYWORD}\s*:?\s*([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)#(\d+)\b"
+)
+CLOSING_URL_RE = re.compile(
+    rf"(?i)\b{CLOSING_KEYWORD}\s*:?\s*"
+    r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/(\d+)\b"
+)
 MODE = "gate-issue-link"
 API = os.environ.get("API", "https://api.github.com").rstrip("/")
 TOKEN = os.environ.get("GH_TOKEN", "")
+CROSS_REPO_TOKEN = os.environ.get("CROSS_REPO_GH_TOKEN", "")
 REPO = os.environ.get("REPO", "")
 
 
@@ -32,11 +44,14 @@ def warn(msg):
     print(f"::warning::{MODE}: {msg}")
 
 
-def call(path, accept="application/vnd.github+json", allow_404=False):
+def call(path, token=None, accept="application/vnd.github+json", allow_404=False):
+    tok = (token or TOKEN).strip()
+    if not tok:
+        fail("GitHub token missing for API call")
     req = urllib.request.Request(
         API + path,
         headers={
-            "Authorization": f"Bearer {TOKEN}",
+            "Authorization": f"Bearer {tok}",
             "Accept": accept,
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "fabricbloc-gate-issue-link",
@@ -54,75 +69,132 @@ def call(path, accept="application/vnd.github+json", allow_404=False):
     return json.loads(body or "null")
 
 
-def parse_enforce_after(raw):
-    if not raw or not raw.strip():
+def _has_explicit_tz(text):
+    if text.endswith("Z"):
+        return True
+    if len(text) >= 6 and text[-6] in "+-" and text[-3] == ":":
+        return True
+    if len(text) >= 5 and text[-5] in "+-" and text[-3].isdigit():
+        return True
+    return False
+
+
+def parse_timestamp(raw, label):
+    if raw is None or not str(raw).strip():
         return None
-    text = raw.strip()
+    text = str(raw).strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
+    elif not _has_explicit_tz(text):
+        if "T" not in text:
+            fail(f"{label} must be ISO-8601 with timezone (got {raw!r})")
+        text = text + "+00:00"
     try:
-        return datetime.fromisoformat(text)
+        dt = datetime.fromisoformat(text)
     except ValueError:
-        fail(f"ISSUE_LINK_ENFORCE_AFTER is not ISO-8601: {raw!r}")
+        fail(f"{label} is not valid ISO-8601: {raw!r}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def effective_enforce_deadline():
+    canon = parse_timestamp(CANON_ISSUE_LINK_ENFORCE_AFTER, "canon issue_link_enforce_after")
+    raw = os.environ.get("ISSUE_LINK_ENFORCE_AFTER", "").strip()
+    if not raw:
+        return canon
+    var = parse_timestamp(raw, "ISSUE_LINK_ENFORCE_AFTER")
+    if var > canon:
+        warn(
+            f"ISSUE_LINK_ENFORCE_AFTER {raw!r} is later than canon {CANON_ISSUE_LINK_ENFORCE_AFTER}; "
+            f"using canon deadline (var may only move enforcement earlier)"
+        )
+        return canon
+    return var
 
 
 def enforce_mode():
-    raw = os.environ.get("ISSUE_LINK_ENFORCE_AFTER", "")
-    deadline = parse_enforce_after(raw)
-    if deadline is None:
-        return "closed"
+    deadline = effective_enforce_deadline()
     now = datetime.now(timezone.utc)
     if now < deadline:
         return "warn"
     return "closed"
 
 
+def cross_repo_allowed(owner_repo):
+    if "/" not in owner_repo:
+        return False
+    owner, name = owner_repo.split("/", 1)
+    if owner.lower() == ORG_OWNER.lower():
+        return True
+    return owner_repo in ISSUE_LINK_CROSS_REPO_ALLOWLIST
+
+
 def parse_issue_refs(body, default_repo):
     refs = []
     seen = set()
-    for m in CLOSING_RE.finditer(body or ""):
+    text = body or ""
+
+    def add(owner, name, num):
+        owner_repo = f"{owner}/{name}"
+        if not cross_repo_allowed(owner_repo):
+            return
+        key = (owner_repo, num)
+        if key not in seen:
+            seen.add(key)
+            refs.append(key)
+
+    for m in CLOSING_SAME_REPO_RE.finditer(text):
         num = int(m.group(1))
         key = (default_repo, num)
         if key not in seen:
             seen.add(key)
             refs.append(key)
-    for m in CROSS_REPO_RE.finditer(body or ""):
-        repo = m.group(1)
-        num = int(m.group(2))
-        key = (repo, num)
-        if key not in seen:
-            seen.add(key)
-            refs.append(key)
+
+    for m in CLOSING_CROSS_REPO_RE.finditer(text):
+        add(m.group(1), m.group(2), int(m.group(3)))
+
+    for m in CLOSING_URL_RE.finditer(text):
+        add(m.group(1), m.group(2), int(m.group(3)))
+
     return refs
 
 
-def issue_is_valid_open_issue(owner_repo, number):
-    owner, name = owner_repo.split("/", 1)
-    item = call(f"/repos/{owner}/{name}/issues/{number}", allow_404=True)
-    if item is None:
-        return False, f"issue {owner_repo}#{number} not found"
-    if item.get("pull_request"):
-        return False, f"{owner_repo}#{number} is a pull request, not an issue"
-    if (item.get("state") or "").lower() != "open":
-        return False, f"issue {owner_repo}#{number} is not open"
-    return True, None
+def paginate_issue_events(repo, pr_number):
+    out = []
+    page = 1
+    while True:
+        batch = call(
+            f"/repos/{repo}/issues/{pr_number}/events?per_page=100&page={page}"
+        )
+        if not isinstance(batch, list):
+            fail("unexpected issue events shape")
+        if not batch:
+            break
+        out.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    return out
 
 
 def label_applied_by_madgeniusblink(repo, pr_number):
-    events = call(f"/repos/{repo}/issues/{pr_number}/events?per_page=100")
-    if not isinstance(events, list):
-        fail("unexpected issue events shape")
-    for ev in reversed(events):
-        if ev.get("event") != "labeled":
+    events = paginate_issue_events(repo, pr_number)
+    label_events = []
+    for ev in events:
+        if ev.get("event") not in ("labeled", "unlabeled"):
             continue
         label = (ev.get("label") or {}).get("name") or ""
         if label.lower() != NO_ISSUE_LABEL:
             continue
-        actor = (ev.get("actor") or {}).get("login") or ""
-        if actor.lower() == NO_ISSUE_LABELER:
-            return True
+        label_events.append(ev)
+    if not label_events:
         return False
-    return False
+    newest = label_events[-1]
+    if newest.get("event") != "labeled":
+        return False
+    actor = (newest.get("actor") or {}).get("login") or ""
+    return actor.lower() == NO_ISSUE_LABELER
 
 
 def pr_has_audited_no_issue(repo, pr_number, labels):
@@ -147,13 +219,80 @@ def check_labeled_event(payload):
         )
 
 
+def token_for_repo(owner_repo):
+    if owner_repo == REPO:
+        return TOKEN
+    if owner_repo.split("/", 1)[0].lower() == ORG_OWNER.lower() and CROSS_REPO_TOKEN.strip():
+        return CROSS_REPO_TOKEN
+    return TOKEN
+
+
+def issue_check_result(owner_repo, number):
+    """Return ('ok', None) | ('bad', reason) | ('unverifiable', reason)."""
+    if not cross_repo_allowed(owner_repo):
+        return "bad", f"cross-repo ref {owner_repo}#{number} is not in {ORG_OWNER} (allowlist)"
+    owner, name = owner_repo.split("/", 1)
+    tok = token_for_repo(owner_repo)
+    cross = owner_repo != REPO
+    item = call(
+        f"/repos/{owner}/{name}/issues/{number}",
+        token=tok,
+        allow_404=True,
+    )
+    if item is None:
+        if cross and not CROSS_REPO_TOKEN.strip():
+            return (
+                "unverifiable",
+                f"cannot verify private cross-repo issue {owner_repo}#{number} "
+                f"(link a same-repo issue or configure HYGIENE_APP client/key for org installation token)",
+            )
+        return "bad", f"issue {owner_repo}#{number} not found"
+    if item.get("pull_request"):
+        return "bad", f"{owner_repo}#{number} is a pull request, not an issue"
+    if (item.get("state") or "").lower() != "open":
+        return "bad", f"issue {owner_repo}#{number} is not open"
+    return "ok", None
+
+
+def evaluate_refs(refs, mode):
+    if not refs:
+        return ["PR body needs Closes|Fixes|Resolves #N (or BloclabsHQ cross-repo / issue URL) linking an open issue"]
+
+    hard = []
+    unverifiable = []
+    any_ok = False
+    for owner_repo, num in refs:
+        status, reason = issue_check_result(owner_repo, num)
+        if status == "ok":
+            any_ok = True
+        elif status == "unverifiable":
+            unverifiable.append(reason)
+        else:
+            hard.append(reason)
+
+    if any_ok:
+        return []
+
+    violations = list(hard)
+    for msg in unverifiable:
+        if mode == "warn":
+            warn(msg)
+        else:
+            violations.append(msg)
+    if not violations and unverifiable and mode == "closed":
+        violations.append(
+            "no verifiable open issue link; configure App token or use a same-repo Closes #N"
+        )
+    return violations
+
+
 def finish(violations, mode):
     if not violations:
         print(f"{MODE}: issue link requirement satisfied")
         return
     summary = "; ".join(violations)
     if mode == "warn":
-        warn(f"phase-in (ISSUE_LINK_ENFORCE_AFTER not reached): {summary}")
+        warn(f"phase-in (before issue-link enforce deadline): {summary}")
         print(f"## {MODE} (warn-only)\n\n{summary}")
         return
     fail(summary)
@@ -186,16 +325,7 @@ def main():
         return
     body = pr.get("body") or ""
     refs = parse_issue_refs(body, REPO)
-    violations = []
-    if not refs:
-        violations.append(
-            "PR body needs Closes|Fixes|Resolves #N or owner/repo#N linking an open issue"
-        )
-    else:
-        for owner_repo, num in refs:
-            ok, reason = issue_is_valid_open_issue(owner_repo, num)
-            if not ok:
-                violations.append(reason)
+    violations = evaluate_refs(refs, mode)
     finish(violations, mode)
 
 
