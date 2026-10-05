@@ -1,0 +1,11 @@
+{
+  "_comment": "Recorded owner override for agent gates (AG-06). Loaded from fabricbloc-branch-policy at pins.agent_gates_sha — never the PR head.",
+  "owner_approved_label": "owner-approved",
+  "gate_owners": [
+    {
+      "login": "madgeniusblink",
+      "user_id": 42707764
+    }
+  ],
+  "allowed_label_apps": []
+}
