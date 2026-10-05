@@ -26,7 +26,7 @@ Verify: `make validate`.
 | `custodian` | string \| null | |
 | `rotation_days` | int \| null | |
 | `last_rotated` | ISO date string \| null | |
-| `status` | enum | `planned`, `active`, `deprecated(until)`, `removed`. |
+| `status` | enum | `planned`, `active`, `deprecated(until)`, `removed`, `superseded`. |
 | `replaces` | string \| null | Prior registry name when rotating. |
 | `expires` | string \| null | PAT expiry (SE-05). |
 | `replace_with` | string \| null | Successor name (SE-05). |

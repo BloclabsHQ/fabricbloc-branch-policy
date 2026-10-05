@@ -104,10 +104,27 @@ class SecretsRegistryB0(unittest.TestCase):
             self.assertEqual(e["status"], "deprecated(until)")
             self.assertEqual(e["github"][0]["repos"], ["BloclabsHQ/fabric-iac"])
 
-    def test_policy_audit_planned_stored_as(self):
+    def test_policy_audit_superseded_by_hygiene(self):
         self.assertEqual(self.by_name["POLICY_AUDIT_APP_ID"]["stored_as"], "variable")
         self.assertEqual(self.by_name["POLICY_AUDIT_APP_PRIVATE_KEY"]["stored_as"], "secret")
-        self.assertEqual(self.by_name["POLICY_AUDIT_APP_ID"]["status"], "planned")
+        self.assertEqual(self.by_name["POLICY_AUDIT_APP_ID"]["status"], "superseded")
+        self.assertEqual(self.by_name["POLICY_AUDIT_APP_ID"]["replace_with"], "HYGIENE_APP_CLIENT_ID")
+        self.assertEqual(self.by_name["POLICY_AUDIT_APP_PRIVATE_KEY"]["replace_with"], "HYGIENE_APP_PRIVATE_KEY")
+
+    def test_gov0034_five_apps_registered(self):
+        for name in (
+            "AGENT_OPS_APP_ID",
+            "AGENT_OPS_OP_TOKEN",
+            "HYGIENE_APP_CLIENT_ID",
+            "HYGIENE_APP_PRIVATE_KEY",
+            "REVIEWER_APP_CLIENT_ID",
+            "REVIEWER_APP_PRIVATE_KEY",
+            "VERDICT_APP_ID",
+            "VERDICT_APP_PRIVATE_KEY",
+            "FABRICBLOC_VERDICT_PRIVATE_KEY",
+        ):
+            self.assertIn(name, self.by_name)
+        self.assertNotIn("AGENT_OPS_APP_PRIVATE_KEY", self.by_name)
 
 
 if __name__ == "__main__":
