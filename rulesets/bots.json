@@ -1,5 +1,5 @@
 {
-  "_comment": "Lowercase bot slugs for agent/<bot>/<kind>/<slug> (GOV-0022 amendment). Extend only via human PR.",
+  "_comment": "BR-04: lowercase role IDs for agent/<bot>/<type>/<scope>-<slug>. Never session/autonomous/provider names. Normative: BR-01 / GOV-0022 ADR (Aether). Routing hint only — authority is executor identity + review-of-record (GOV-0033 D5).",
   "bots": [
     "anvil",
     "aether",

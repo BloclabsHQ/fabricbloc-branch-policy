@@ -94,7 +94,7 @@ class CloudSessionsPolicy(unittest.TestCase):
             self.assertIsNotNone(guard_rx.match(sample), sample)
             self.assertIsNotNone(policy_rx.match(sample), sample)
         bot_re = re.compile(self.data["launch"]["branch_name"]["bot_branch_regex"])
-        self.assertIsNotNone(bot_re.match("agent/warden/feat/my-slug"))
+        self.assertIsNotNone(bot_re.match("agent/warden/feat/scope-my-slug"))
 
 
 if __name__ == "__main__":

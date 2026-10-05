@@ -12,7 +12,8 @@ run_case() {
   set +e
   output="$(
     BRANCH="$branch" BASE_BRANCHES="main,dev,master" \
-      LEGACY_BRANCH_ACCEPT_UNTIL="2099-01-01T00:00:00Z" \
+      LEGACY_BRANCH_PR_CREATED_BEFORE="2099-01-01T00:00:00Z" \
+      PR_CREATED_AT="2026-10-01T00:00:00Z" \
       REPO="" GH_TOKEN="" \
       python3 "$root/branch-name-guard/guard_logic.py" 2>&1
   )"
@@ -34,7 +35,7 @@ accepted=(
   "debu99/feat/identity-alignment"
   "agent/session/docs/658-branch-identity-patterns"
   "agent/autonomous/ci/fleet-branch-guard"
-  "agent/warden/feat/my-feature"
+  "agent/warden/feat/warden-my-feature"
 )
 
 rejected=(

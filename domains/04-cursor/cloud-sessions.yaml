@@ -8,9 +8,11 @@ launch:
     strategy: find_by_pr_then_reply
     never_relaunch_if_agent_exists: true
   branch_name:
-    # GOV-0022 agent grammar (legacy dual-accept; see branch-name-guard LEGACY_AGENT_RE).
+    # BR-01 / GOV-0022 (ADR owned by Aether). Executable: scripts/branch-name-policy.py + branch-name-guard.
     session_branch_regex: '^agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+$'
-    bot_branch_regex: '^agent/(warden|madengineer|madagentpm|sentinel|sweeper|aether|loom|anvil|madgeniusbot|cursoragent)/(chore|feat|fix|test)/[a-z0-9-]+$'
+    bot_branch_regex: '^agent/(anvil|aether|cursoragent|loom|madagentpm|madengineer|madgeniusbot|sentinel|sweeper|warden)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+$'
+    # Engine manifest `agent_re` (fabricbloc cursor-env): accept either grammar above.
+    agent_re: '^(agent/(session|autonomous)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+|agent/(anvil|aether|cursoragent|loom|madagentpm|madengineer|madgeniusbot|sentinel|sweeper|warden)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)+)$'
   registry:
     recheck_and_claim_before_launch: true
     dedupe_after_launch: true

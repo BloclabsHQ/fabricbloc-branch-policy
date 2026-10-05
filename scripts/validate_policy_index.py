@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "POLICY_INDEX.md"
-ROW = re.compile(r"^\| (CU-\d+|AG-\d+|MR-\d+|SE-\d+) \|")
+ROW = re.compile(r"^\| (BR-\d+|CU-\d+|AG-\d+|MR-\d+|SE-\d+) \|")
 
 
 def main() -> int:
@@ -25,7 +25,11 @@ def main() -> int:
             bad.append(f"{rid}: row has {len(parts)} columns, expected at least 5 (ID..Test)")
             continue
         test_col = parts[4]
-        if rid.startswith("CU-"):
+        if rid.startswith("BR-"):
+            t = ROOT / "scripts" / "test_branch_name_policy.py"
+            if test_col != str(t.relative_to(ROOT)) or not t.is_file():
+                bad.append(f"{rid}: test column must be {t.relative_to(ROOT)}")
+        elif rid.startswith("CU-"):
             t = ROOT / "domains" / "04-cursor" / "tests" / "test_cloud_sessions.py"
             if test_col != str(t.relative_to(ROOT)) or not t.is_file():
                 bad.append(f"{rid}: test column must be {t.relative_to(ROOT)}")
