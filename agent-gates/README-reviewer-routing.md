@@ -18,7 +18,8 @@ Canon: `rulesets/reviewers.json` loaded from `fabricbloc-branch-policy` at **`pi
 - **Verdict path** (`verdict_approval_enabled: true`): every required reviewer has an unedited, unfenced PASS at head from **`verdict_app`** (**fabricbloc-verdict[bot]** / **337980250**; both must match). Any slug FAIL at head blocks approval. **`user_id: 0` fails closed** if ever reintroduced,
 - **Deterministic** path (unchanged): pure allowlisted docs/fixtures under pinned extension policy, no routes/exclusions/Cris-only/verdict-eligible paths,
 - No **cris_required** route, and
-- `REVIEWER_APP_TOKEN` minted when submitting APPROVE (missing key → skip with notice).
+- **`agent-review-of-record`** job (`pull_request`): exact-head APPROVE gate only — no secrets.
+- **`reviewer-app-auto-approve`** job (`pull_request_target`, env **`reviewer`**): mint + App APPROVE (missing env PEM → skip with notice; no repo/org fallback). Env deployment rules: **`main` only** — **must not** match `refs/pull/*` (Q14 alone is not enough while cursor[bot] pushes).
 
 ## Routing (priority)
 
