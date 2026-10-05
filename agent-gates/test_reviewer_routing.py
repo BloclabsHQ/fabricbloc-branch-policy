@@ -293,6 +293,43 @@ class TestReviewerRouting(unittest.TestCase):
             eg.agent_denied_paths_successful = orig
         self.assertFalse(ok)
 
+    def test_non_required_fail_blocks_docs_only_probe_r22(self):
+        """R22: madagentpm PASS + warden FAIL on docs-only must not satisfy verdict approval."""
+        paths = {"docs/readme.md"}
+        comments = [
+            comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+            comment(verdict_marker("warden", HEAD, "FAIL"), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+        ]
+        import embedded_gate as eg
+
+        orig = eg.agent_denied_paths_successful
+        eg.agent_denied_paths_successful = lambda _h: True
+        try:
+            ok, reason = verdict_approval_satisfied(
+                comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
+        finally:
+            eg.agent_denied_paths_successful = orig
+        self.assertFalse(ok)
+        self.assertIn("warden", reason)
+        self.assertIn("FAIL", reason)
+
+    def test_same_slug_newer_pass_overrides_older_fail(self):
+        paths = {"docs/readme.md"}
+        comments = [
+            comment(verdict_marker("madagentpm", HEAD, "FAIL"), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+            comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=VERDICT_BOT_ID),
+        ]
+        import embedded_gate as eg
+
+        orig = eg.agent_denied_paths_successful
+        eg.agent_denied_paths_successful = lambda _h: True
+        try:
+            ok, reason = verdict_approval_satisfied(
+                comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
+        finally:
+            eg.agent_denied_paths_successful = orig
+        self.assertTrue(ok, reason)
+
     def test_body_without_code_fences(self):
         inner = verdict_marker("x", HEAD)
         self.assertNotIn("fabricbloc-verdict", body_without_code_fences(f"```\n{inner}\n```"))

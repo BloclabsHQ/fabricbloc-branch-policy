@@ -861,12 +861,12 @@ def verdict_approval_satisfied(comments, head, paths, cfg, excluded_logins, deni
         return False, "newest agent-denied-paths (GitHub Actions app 15368) not success on head"
     required = required_verdict_reviewers(paths, cfg, REPO, head_ref, denied_entries)
     markers = parse_verdict_markers_from_comments(comments, head, excluded_logins, cfg)
+    for rev, verdict in markers.items():
+        if verdict == "FAIL":
+            return False, f"FAIL verdict for `{rev}` at head"
     for rev in required:
         if markers.get(rev) != "PASS":
             return False, f"missing PASS verdict for `{rev}` at head"
-    for rev, verdict in markers.items():
-        if verdict == "FAIL" and rev in required:
-            return False, f"FAIL verdict for `{rev}` at head"
     return True, None
 
 
