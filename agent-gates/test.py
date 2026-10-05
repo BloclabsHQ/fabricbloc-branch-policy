@@ -628,6 +628,11 @@ class T(unittest.TestCase):
         self.assertIn("bot", out.lower())
 
     def test_owner_approval_github_app_event_fails_when_allowlist_empty(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        pin = "cafebabecafebabecafebabecafebabecafebabe"
+        canon.setdefault("pins", {})["agent_gates_sha"] = pin
+        owners_cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
+        owners_cfg["allowed_label_apps"] = []
         setup(
             files=(".github/workflows/ci.yml",),
             issue_labels=("owner-approved",),
@@ -635,6 +640,10 @@ class T(unittest.TestCase):
                 performed_via_github_app={"id": 999, "slug": "evil-app", "name": "Evil"},
             ),),
             push_activity=[push_activity_entry()],
+            policy_routes_extra={
+                "extra_gate_owners_by_ref": {pin: owners_cfg},
+                "canon_override": canon,
+            },
             **AGENT,
         )
         code, out = run("agent-denied-paths")
@@ -664,6 +673,41 @@ class T(unittest.TestCase):
             **AGENT,
         )
         self.assertEqual(run("agent-denied-paths")[0], 0)
+        self.assertEqual(run("agent-review-of-record")[0], 0)
+
+    def test_owner_approval_cursor_app_non_owner_fails(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(
+                login="notcris",
+                user_id=1,
+                performed_via_github_app={"id": 1210556, "slug": "cursor"},
+            ),),
+            push_activity=[push_activity_entry()],
+            **AGENT,
+        )
+        for wf in ("agent-denied-paths", "agent-review-of-record"):
+            code, out = run(wf)
+            self.assertEqual(code, 1, out)
+            self.assertIn("not a configured gate owner", out)
+
+    def test_owner_approval_cursor_app_wrong_user_id_fails(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(
+                login="madgeniusblink",
+                user_id=1,
+                performed_via_github_app={"id": 1210556, "slug": "cursor"},
+            ),),
+            push_activity=[push_activity_entry()],
+            **AGENT,
+        )
+        for wf in ("agent-denied-paths", "agent-review-of-record"):
+            code, out = run(wf)
+            self.assertEqual(code, 1, out)
+            self.assertIn("not a configured gate owner", out)
 
     def test_owner_approval_disallowed_github_app_fails(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
