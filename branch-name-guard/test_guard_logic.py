@@ -77,6 +77,16 @@ class TestBranchGrammar(unittest.TestCase):
         )
 
 
+class TestCanonParity(unittest.TestCase):
+    def test_embedded_legacy_cutoff_matches_canon_json(self):
+        root = Path(__file__).resolve().parents[1]
+        canon = json.loads((root / "rulesets/canon.json").read_text())
+        self.assertEqual(
+            gl.CANON_LEGACY_BRANCH_PR_CREATED_BEFORE,
+            canon["pins"]["legacy_branch_pr_created_before"],
+        )
+
+
 class TestLegacyCutoffPolicy(unittest.TestCase):
     def test_unset_var_uses_canon(self):
         env = os.environ.copy()
@@ -117,17 +127,34 @@ class TestBotsJsonPin(unittest.TestCase):
             calls.append(ref)
             raise urllib.error.HTTPError("url", 404, "missing", {}, None)
 
-        with patch.object(gl, "fetch_bots_json_at_ref", side_effect=fake_fetch):
-            with patch.dict(
-                os.environ,
-                {"GH_TOKEN": "x", "POLICY_BOTS_JSON_SHA": "deadbeef" * 5},
-                clear=False,
-            ):
-                os.environ.pop("BOTS_JSON_REF", None)
-                data = gl.fetch_bots_json_from_api()
+        with patch.object(gl, "ref_is_on_main_history", return_value=True):
+            with patch.object(gl, "fetch_bots_json_at_ref", side_effect=fake_fetch):
+                with patch.dict(
+                    os.environ,
+                    {"GH_TOKEN": "x", "POLICY_BOTS_JSON_SHA": "deadbeef" * 5},
+                    clear=False,
+                ):
+                    os.environ.pop("BOTS_JSON_REF", None)
+                    data = gl.fetch_bots_json_from_api()
         self.assertIsNone(data)
         self.assertEqual(calls, ["deadbeef" * 5, "main"])
         self.assertNotIn("refs/pull", " ".join(calls))
+
+    def test_untrusted_pin_fails_closed(self):
+        with patch.object(gl, "ref_is_on_main_history", return_value=False):
+            with patch.dict(
+                os.environ,
+                {"GH_TOKEN": "x", "POLICY_BOTS_JSON_SHA": "badc0ffee" * 5},
+                clear=False,
+            ):
+                with self.assertRaises(SystemExit):
+                    gl.fetch_bots_json_from_api()
+
+    def test_legacy_branch_not_bot_grammar(self):
+        """Legacy session path must not match bot/<bot>/ regex (fullmatch)."""
+        branch = "agent/session/feat/warden-my-slug"
+        self.assertIsNone(gl.bot_agent_re(gl.SYNCED_BOT_SLUGS).fullmatch(branch))
+        self.assertIsNotNone(gl.LEGACY_AGENT_RE.fullmatch(branch))
 
     def test_synced_slugs_match_bots_json(self):
         root = Path(__file__).resolve().parents[1]
