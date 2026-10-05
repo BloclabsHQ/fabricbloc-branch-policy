@@ -34,6 +34,7 @@ HEAD = "a" * 40
 OLD = "b" * 40
 CFG = json.loads((ROOT.parent / "rulesets" / "reviewers.json").read_text())
 DENIED = list(FLOOR_DENIED)
+MANIFEST_ARCH_DENIED = list(FLOOR_DENIED) + ["architecture/decisions/"]
 CURSOR_ID = 199161495
 CRIS_ID = 42707764
 VERDICT_BOT = "fabricbloc-verdict[bot]"
@@ -84,6 +85,18 @@ class TestTwoTierDeniedPaths(unittest.TestCase):
         self.assertEqual(
             classify_agent_path_tier("architecture/decisions/ARCH-0045.md", DENIED),
             "verdict_eligible",
+        )
+
+    def test_non_gov_adr_verdict_eligible_manifest_arch_decisions_denied(self):
+        self.assertEqual(
+            classify_agent_path_tier("architecture/decisions/ARCH-0048.md", MANIFEST_ARCH_DENIED),
+            "verdict_eligible",
+        )
+
+    def test_gov_adr_cris_only_manifest_arch_decisions_denied(self):
+        self.assertEqual(
+            classify_agent_path_tier("architecture/decisions/GOV-0033-d1.md", MANIFEST_ARCH_DENIED),
+            "cris_only",
         )
 
     def test_engine_non_test_py_cris_only(self):
