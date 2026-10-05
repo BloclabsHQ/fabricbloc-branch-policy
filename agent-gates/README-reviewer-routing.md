@@ -4,7 +4,7 @@ Canon: `rulesets/reviewers.json` loaded from `fabricbloc-branch-policy` at **`pi
 
 ## Auto-approve
 
-**fabricbloc-verdict** posts PR **comments** (Issues API). **fabricbloc-reviewer** (App **5185203**, bot **337673700**) submits the GitHub **APPROVE** after the gate validates verdicts or deterministic allowlist rules.
+**fabricbloc-verdict** posts PR **comments** (Issues API; App needs **Issues** and **Pull requests: Read & write** — PR comment create returns **403** with Issues-only write). **fabricbloc-reviewer** (App **5185203**, bot **337673700**) submits the GitHub **APPROVE** after the gate validates verdicts or deterministic allowlist rules. An **APPROVE** from **fabricbloc-verdict[bot]** never satisfies review-of-record (only PASS comment markers do).
 
 **Two-tier agent-denied-paths**
 

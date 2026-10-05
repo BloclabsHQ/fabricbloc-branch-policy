@@ -24,6 +24,8 @@ GITHUB_HOSTED_RUNNER_LABELS = frozenset({
 HEAD, BASE, OLD = "h" * 40, "b" * 40, "o" * 40
 REVIEWER_BOT = "fabricbloc-reviewer[bot]"
 REVIEWER_BOT_ID = 337673700
+VERDICT_BOT = "fabricbloc-verdict[bot]"
+VERDICT_BOT_ID = 337980250
 
 
 def validate_required_gate_hosted_only(name, doc):
@@ -815,6 +817,30 @@ class T(unittest.TestCase):
               engine_config=cfg, **AGENT)
         code, out = run("agent-review-of-record")
         self.assertEqual(code, 1, out)
+
+    def test_verdict_app_approve_never_qualifies_review_of_record(self):
+        ns = load_gate_constants()
+        review = {
+            "state": "APPROVED",
+            "commit_id": HEAD,
+            "user": {"login": VERDICT_BOT, "id": VERDICT_BOT_ID},
+            "body": reviewer_body(),
+        }
+        allow = {"Madgeniusblink", VERDICT_BOT}
+        self.assertFalse(
+            ns["approval_qualifies"](review, HEAD, allow, set(), ns["REVIEWER_APP_BOTS"])
+        )
+        cfg = (
+            f"human: ['Madgeniusblink']\n"
+            f"ai_reviewers: ['{VERDICT_BOT}']\n"
+        )
+        setup(
+            files=("docs/x.md",),
+            reviews=[approve(VERDICT_BOT, body=reviewer_body(), user_id=VERDICT_BOT_ID)],
+            engine_config=cfg,
+            **AGENT,
+        )
+        self.assertEqual(run("agent-review-of-record")[0], 1)
 
     def test_reviewer_app_approval_at_head_valid_body_passes(self):
         cfg = f"human: ['Madgeniusblink']\nai_reviewers: ['{REVIEWER_BOT}']\n"
