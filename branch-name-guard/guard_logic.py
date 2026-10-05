@@ -16,7 +16,7 @@ HUMAN_RE = re.compile(
     r"(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/"
     r"[a-z0-9]+(-[a-z0-9]+)*$"
 )
-PROVIDER_RE = re.compile(r"^(codex|claude|qwen|cursor)/")
+PROVIDER_PREFIX_RE = re.compile(r"^(codex|claude|qwen|cursor)/.+$")
 AGENT_TYPES = (
     "feat", "fix", "chore", "docs", "refactor", "test", "ci", "perf", "revert", "build", "style",
 )
@@ -24,6 +24,7 @@ SLUG = r"[a-z0-9]+(-[a-z0-9]+)+"
 TYPES_ALT = "|".join(AGENT_TYPES)
 RESERVED_BOT_SLUGS = frozenset({"session", "autonomous", "cursor", "codex", "claude", "qwen"})
 LEGACY_AGENT_RE = re.compile(rf"^agent/(session|autonomous)/({TYPES_ALT})/{SLUG}$")
+AGENT_PROVIDER_PREFIX_RE = re.compile(r"^agent/(codex|claude|qwen|cursor)/.+$")
 # Embedded from rulesets/canon.json (re-pin with branch_name_guard_sha when bots.json changes on main).
 CANON_LEGACY_BRANCH_PR_CREATED_BEFORE = "2026-10-19T00:00:00Z"
 CANON_BOTS_JSON_SHA = "e8a5985f5ebf7b3795716b29fb3778e9842a3e25"
@@ -84,6 +85,39 @@ def effective_legacy_cutoff():
     return var
 
 
+def api_get_json(path, token):
+    req = urllib.request.Request(
+        API + path,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "branch-name-guard",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        raise exc
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        fail(f"GitHub API error on {path.split('?')[0]}: {exc}")
+
+
+def ref_is_on_main_history(policy_repo, token, ref):
+    """True when ref is main or an ancestor of main (trusted policy pin)."""
+    if ref in ("main", "refs/heads/main"):
+        return True
+    base = urllib.parse.quote(ref, safe="")
+    head = urllib.parse.quote("main", safe="")
+    try:
+        data = api_get_json(f"/repos/{policy_repo}/compare/{base}...{head}", token)
+    except urllib.error.HTTPError:
+        return False
+    # base=pin, head=main: ancestor pin yields status "ahead" (main is ahead of pin).
+    return (data or {}).get("status") in ("ahead", "identical")
+
+
 def fetch_bots_json_at_ref(policy_repo, token, ref):
     q = urllib.parse.quote("rulesets/bots.json", safe="")
     req = urllib.request.Request(
@@ -112,6 +146,11 @@ def fetch_bots_json_from_api():
             refs.append(ref)
     last_exc = None
     for ref in refs:
+        if ref != "main" and not ref_is_on_main_history(policy_repo, token, ref):
+            fail(
+                f"POLICY_BOTS_JSON_SHA {ref!r} is not on main history; "
+                f"refusing untrusted rulesets/bots.json"
+            )
         try:
             return fetch_bots_json_at_ref(policy_repo, token, ref)
         except urllib.error.HTTPError as exc:
@@ -185,10 +224,10 @@ def legacy_allowed_for_pr(legacy_cutoff, pr_created_at):
 
 def attributed_bot(branch, bots):
     """Routing hint only — not authority (GOV-0033 D5)."""
-    m = bot_agent_re(bots).match(branch)
+    m = bot_agent_re(bots).fullmatch(branch)
     if m:
         return m.group(1)
-    m = LEGACY_AGENT_RE.match(branch)
+    m = LEGACY_AGENT_RE.fullmatch(branch)
     if m:
         slug = branch.split("/")[-1]
         if "-" in slug:
@@ -202,15 +241,15 @@ def validate(branch, base_branches, bots, legacy_cutoff, pr_created_at):
             print(f"{MODE}: '{branch}' is a base branch, exempt.")
             return 0
     if branch.startswith("agent/"):
-        if re.match(r"^agent/(codex|claude|qwen|cursor)/", branch):
+        if AGENT_PROVIDER_PREFIX_RE.fullmatch(branch):
             fail(f"'{branch}' uses blocked provider-style agent prefix (bot slugs are role IDs, not providers)")
         new_re = bot_agent_re(bots)
-        if new_re.match(branch):
+        if new_re.fullmatch(branch):
             bot = attributed_bot(branch, bots)
             print(f"::notice title=attributed_bot::{bot}")
             print(f"{MODE}: '{branch}' matches agent/<bot>/<type>/<scope>-<slug> (routing hint only).")
             return 0
-        if LEGACY_AGENT_RE.match(branch):
+        if LEGACY_AGENT_RE.fullmatch(branch):
             if legacy_allowed_for_pr(legacy_cutoff, pr_created_at):
                 bot = attributed_bot(branch, bots)
                 if bot:
@@ -223,9 +262,9 @@ def validate(branch, base_branches, bots, legacy_cutoff, pr_created_at):
                 f"(see BR-01 / bots.json)"
             )
         fail(f"'{branch}' does not match agent naming convention.")
-    if PROVIDER_RE.match(branch):
+    if PROVIDER_PREFIX_RE.fullmatch(branch):
         fail(f"'{branch}' uses blocked provider prefix.")
-    if HUMAN_RE.match(branch):
+    if HUMAN_RE.fullmatch(branch):
         print(f"{MODE}: '{branch}' matches human convention.")
         return 0
     fail(f"'{branch}' does not match the FabricBloc naming convention.")
