@@ -27,6 +27,22 @@ class TestBranchGrammar(unittest.TestCase):
         )
         self.assertEqual(rc, 0)
 
+    def test_aether_docs_branch_passes(self):
+        """fabricbloc#1581-style agent/<bot>/… must pass (not legacy session-only pin)."""
+        bots = list(gl.SYNCED_BOT_SLUGS)
+        rc = gl.validate(
+            "agent/aether/docs/atlas-http-events-spec",
+            ["main"],
+            bots,
+            gl.parse_timestamp(gl.CANON_LEGACY_BRANCH_PR_CREATED_BEFORE, "canon"),
+            "2026-10-01T00:00:00Z",
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            gl.attributed_bot("agent/aether/docs/atlas-http-events-spec", bots),
+            "aether",
+        )
+
     def test_unknown_bot_rejected(self):
         with self.assertRaises(SystemExit):
             gl.validate(
@@ -84,6 +100,14 @@ class TestCanonParity(unittest.TestCase):
         self.assertEqual(
             gl.CANON_LEGACY_BRANCH_PR_CREATED_BEFORE,
             canon["pins"]["legacy_branch_pr_created_before"],
+        )
+
+    def test_embedded_bots_pin_matches_canon_json(self):
+        root = Path(__file__).resolve().parents[1]
+        canon = json.loads((root / "rulesets/canon.json").read_text())
+        self.assertEqual(
+            gl.CANON_BOTS_JSON_SHA,
+            canon["pins"]["branch_name_guard_sha"],
         )
 
 

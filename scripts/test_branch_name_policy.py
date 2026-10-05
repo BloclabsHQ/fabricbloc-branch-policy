@@ -34,6 +34,22 @@ class TestBranchNamePolicy(unittest.TestCase):
         self.assertIsNotNone(rx.match("agent/warden/feat/scope-my-slug"))
         self.assertIsNone(rx.match("agent/warden/feat/nohyphen"))
 
+    def test_aether_docs_branch_matches_bot_grammar(self):
+        bots = bnp.load_bot_slugs()
+        rx = bnp.bot_agent_re(bots)
+        branch = "agent/aether/docs/atlas-http-events-spec"
+        self.assertIsNotNone(rx.fullmatch(branch), branch)
+
+    def test_provider_prefixes_not_bot_grammar(self):
+        bots = bnp.load_bot_slugs()
+        rx = bnp.bot_agent_re(bots)
+        for branch in (
+            "codex/docs/my-feature-slug",
+            "agent/codex/docs/my-feature-slug",
+            "cursor/fix/my-feature-slug",
+        ):
+            self.assertIsNone(rx.fullmatch(branch), branch)
+
     def test_bots_json_has_no_reserved_slugs(self):
         bots = bnp.load_bot_slugs()
         for b in bots:
