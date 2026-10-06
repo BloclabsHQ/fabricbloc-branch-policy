@@ -191,6 +191,8 @@ Org ruleset `canon-agent-gates` (org ruleset id **24445414**, **Active**, no byp
 
 **After changing any pinned gate workflow on `main`:** Cris must re-pin org ruleset **24445414** (`canon-agent-gates`) so both `workflows[].sha` and `pins.agent_gates_sha` in `rulesets/canon.json` match **this PR's squash SHA** on `main`, then apply/update the org ruleset. Until re-pinned, fabricbloc still runs the old SHA.
 
+**Gate JSON without org apply (DECISIONS #19):** Merges to `main` that change `pins.agent_gates_sha` and/or `rulesets/gate-owners.json` / `rulesets/reviewers.json` at that ref update live fleet gate config immediately; only embedded workflow script changes need org **24445414** apply. See `rulesets/canon.json` `pins._note`.
+
 **Post-rollout check (hosted runners):** On an open PR to `main`, confirm each org-required workflow run shows a GitHub-hosted runner (`runner_name` like `GitHub Actions …`, labels including `ubuntu-latest`) and completes (not stuck queued).
 
 **M6 probe (retarget gap, finding (c)):** With org ruleset **24445414** live on `~DEFAULT_BRANCH`, `refs/heads/main`, `refs/heads/release/**`, `refs/heads/prod/**`:

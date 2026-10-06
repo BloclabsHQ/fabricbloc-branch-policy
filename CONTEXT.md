@@ -23,7 +23,7 @@ Harnesses and session economy code consume pinned SHAs of this repo; they do not
 
 ## Agent instructions
 
-Public policy repo for FabricBloc branch naming (GOV-0022) and pinned enforcement workflows. Consumers call reusable workflows at immutable SHAs declared in `rulesets/canon.json`; changing embedded workflow YAML still requires an org owner re-pin/apply. **Exception:** merges to `main` that change `pins.agent_gates_sha` and/or `rulesets/gate-owners.json` / `rulesets/reviewers.json` at that ref update live fleet gate JSON config immediately (gates read canon from policy `main`; this repo is not gated by those workflows).
+Public policy repo for FabricBloc branch naming (GOV-0022) and pinned enforcement workflows. Consumers call reusable workflows at immutable SHAs declared in `rulesets/canon.json`; changing embedded workflow YAML still requires an org owner re-pin/apply. **Exception (DECISIONS #19):** merges to `main` that change `pins.agent_gates_sha` and/or `rulesets/gate-owners.json` / `rulesets/reviewers.json` at that ref update live fleet gate JSON config immediately (gates read canon from policy `main`; this repo is not gated by those workflows). Proposed **`require_code_owner_review`** on **`policy-main-protected`** is **Cris-gated** and deadlocks bot-authored PRs until a second CODEOWNERS owner or bypass — see **`rulesets/canon.json`** `_code_owner_review_proposal`.
 
 ## What this repo is
 

@@ -1,6 +1,9 @@
 # Gate config and canon pins — require human review before merge to main.
 # TODO: add @BloclabsHQ/sentinel (or security team handle) when confirmed for rulesets/.
 # Fleet gates do not run on this repo (SELF_REPO skip); merged JSON at pins.agent_gates_sha is live for the org without a separate org apply.
+# require_code_owner_review (proposed, DECISIONS #19): needs a second owner or Cris bypass — bot PRs are authored as madgeniusblink.
+
+/.github/CODEOWNERS @Madgeniusblink
 
 /rulesets/ @Madgeniusblink
 /rulesets/canon.json @Madgeniusblink
