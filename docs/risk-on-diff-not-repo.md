@@ -1,6 +1,6 @@
 # Risk on the diff, not the repo
 
-**Council-delegated founder decision:** **DECISIONS #18** (Warden; requested by MadICM; Cris assignment **2026-10-05**).
+**Council-delegated founder decision:** **DECISIONS #18** (Warden; requested by MadICM; Cris assignment **2026-10-05**). **Addendum (Aether via MadICM):** semantics of **“touches”** below.
 
 ## Task assignment is the founder yes
 
@@ -14,18 +14,18 @@ When **Cris assigns a task**, that assignment is the **founder yes** to merge PR
 
 ## Human merge depends on the diff
 
-A **named human merge** (Cris) applies only when the **diff** touches:
+**“Touches”** means the diff **edits** the protected **files or values themselves**: prod config, mainnet addresses, key/signer config, IAM, secrets, deploy workflows, funds/custody logic, or the Cris-only gate paths (workflows, **CODEOWNERS**, org ruleset bodies, engine control files, etc.).
 
-- Production config
-- Mainnet addresses
-- Keys or signers
-- IAM
-- Secrets
-- Deploy workflows
-- Funds or custody (**FC-01**, **DECISIONS #15**)
-- **Cris-only** paths in pinned **`agent-denied-paths`** (org rulesets, **CODEOWNERS**, gate control files, workflows, engine, etc.)
+Docs or context that **only names or points to** a boundary does **not** trigger a named human merge under this policy.
+
+| Case | Example |
+|---|---|
+| **Named human merge (content edit)** | Diff changes a live mainnet treasury address in `config/mainnet/contracts.json`, or sets `DEPLOYER_KEY` in a prod env file the diff modifies. |
+| **Agent lane OK (reference only)** | Diff adds to **`AGENTS.md`**: “Changes to **`DEPLOYER_KEY`** or **`config/prod.yaml`** require **FC-01** / Cris before merge” — without editing those keys or that yaml file. |
 
 A repository **risk tier alone never requires a human merge**. Plans, runbooks, and checklists must **not** add a repo-tier human gate.
+
+**Separate from this prose:** pinned **`agent-denied-paths`** still enforces by **file path**, not by whether the edit changes a secret value. A docs or context file on a **Cris-only path** (for example a comment-only edit to **`rulesets/canon.json`**) still needs **AG-06** **`owner-approved`** (or a human branch) even when the content is purely documentary.
 
 ## Agent merge lane (Sweeper)
 
