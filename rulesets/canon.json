@@ -69,7 +69,7 @@
           }
         }
       ],
-      "_live_drift": "Live org ruleset 24445414 (MadAgentPM read 2026-10-05): repository_name.include is fabricbloc, context, keyflo-session-issuer only — not fabric-wallet (PR-D/#51 intent). Staged Cris apply updates workflow SHAs to pins.agent_gates_sha only. Canon keeps fabric-wallet in include until a separate org apply onboarded wallet.",
+      "_live_drift": "Desktop read 2026-10-05 (MadAgentPM): live org ruleset 24445414 Active, no bypass; repository_name.include is fabricbloc, context, keyflo-session-issuer only (fabric-wallet needs a separate org apply). Required workflows live: agent-denied-paths + agent-review-of-record pinned @ ff3c7c8 — no gate-issue-link. Staged (unsaved) Cris apply would re-pin both gates to pins.agent_gates_sha (093f61db) and add gate-issue-link; it does not add fabric-wallet to targets.",
       "rules": [
         {
           "type": "workflows",
@@ -105,7 +105,7 @@
       "_finding": "Warden: fabric-wallet merged to dev/main while CI red or pending (#1433, #1435). Founder yes WALLET-GREEN-CI recorded 2026-10-05 01:01 PT (Cris via MadGeniusBot).",
       "_apply_after": "Done (2026-10-05 PT): policy PR #47 merged (06cfa0c); MadGeniusBot applied live org ruleset 24489464 on fabric-wallet",
       "_live_ruleset_id": 24489464,
-      "_live_drift": "MadAgentPM desktop read 2026-10-05: org ruleset 24489464 Active on fabric-wallet dev+main; pull_request required_approving_review_count 0 matches canon. No drift recorded on enforced fields.",
+      "_live_drift": "Desktop read 2026-10-05 (MadAgentPM): org ruleset 24489464 Active on fabric-wallet dev+main; pull_request required_approving_review_count 0 matches on fields read (targets, refs, review count).",
       "_comment": "Org ruleset scoped by repository_name.include (add repo short names to extend). Job-level skips in ci.yml report success when docs-only; do not add Detect changes as required.",
       "target": "branch",
       "enforcement": "active",
@@ -618,7 +618,7 @@
       "ref": "refs/heads/main",
       "live_id": 79877078,
       "kind": "classic_branch_protection",
-      "_note": "MadAgentPM desktop read 2026-10-05: classic branch protection on main (not modeled in canon.json). PR required; required_approving_review_count 0; dismiss_stale_reviews_on_push, require_code_owner_reviews, require_last_push_approval off; enforce_admins on; bypass_pull_request_allowances permitted for configured actors. Aggregates with repo ruleset main-required-ci 20436874 (which has no pull_request rule live)."
+      "_note": "Desktop read 2026-10-05 (MadAgentPM): classic branch protection on main (not modeled in canon.json). PR required; required_approving_review_count 0; dismiss_stale_reviews_on_push, require_code_owner_reviews, require_last_push_approval off; allow specified actors to bypass required pull requests on; require status checks on; enforce_admins on. Aggregates with repo ruleset main-required-ci 20436874 (which has no pull_request rule live)."
     }
   ]
 }
