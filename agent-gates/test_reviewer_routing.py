@@ -228,7 +228,7 @@ class TestReviewerRouting(unittest.TestCase):
         import embedded_gate as eg
 
         orig = eg.agent_denied_paths_successful
-        eg.agent_denied_paths_successful = lambda _h: True
+        eg.agent_denied_paths_successful = lambda _h, **_: True
         try:
             ok, reason = verdict_approval_satisfied(
                 comments, HEAD, paths, CFG, set(), DENIED, "agent/session/feat/x-y")
@@ -289,7 +289,7 @@ class TestReviewerRouting(unittest.TestCase):
         import embedded_gate as eg
 
         orig = eg.agent_denied_paths_successful
-        eg.agent_denied_paths_successful = lambda _h: True
+        eg.agent_denied_paths_successful = lambda _h, **_: True
         try:
             ok, reason = verdict_approval_satisfied(
                 comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
@@ -307,7 +307,7 @@ class TestReviewerRouting(unittest.TestCase):
         import embedded_gate as eg
 
         orig = eg.agent_denied_paths_successful
-        eg.agent_denied_paths_successful = lambda _h: True
+        eg.agent_denied_paths_successful = lambda _h, **_: True
         try:
             ok, reason = verdict_approval_satisfied(
                 comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
@@ -321,7 +321,7 @@ class TestReviewerRouting(unittest.TestCase):
         import embedded_gate as eg
 
         orig = eg.agent_denied_paths_successful
-        eg.agent_denied_paths_successful = lambda _h: True
+        eg.agent_denied_paths_successful = lambda _h, **_: True
         try:
             ok, _ = verdict_approval_satisfied(
                 comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
@@ -339,7 +339,7 @@ class TestReviewerRouting(unittest.TestCase):
         import embedded_gate as eg
 
         orig = eg.agent_denied_paths_successful
-        eg.agent_denied_paths_successful = lambda _h: True
+        eg.agent_denied_paths_successful = lambda _h, **_: True
         try:
             ok, reason = verdict_approval_satisfied(
                 comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
@@ -358,7 +358,7 @@ class TestReviewerRouting(unittest.TestCase):
         import embedded_gate as eg
 
         orig = eg.agent_denied_paths_successful
-        eg.agent_denied_paths_successful = lambda _h: True
+        eg.agent_denied_paths_successful = lambda _h, **_: True
         try:
             ok, reason = verdict_approval_satisfied(
                 comments, HEAD, paths, CFG_VERDICT, set(), DENIED, "agent/session/feat/x-y")
@@ -386,7 +386,7 @@ class TestReviewerRouting(unittest.TestCase):
         orig_denied = eg.agent_denied_paths_successful
         orig_page = eg.paginate
         eg.post_issue_comment = fake_post
-        eg.agent_denied_paths_successful = lambda _head: False
+        eg.agent_denied_paths_successful = lambda _head, **_: False
         eg.paginate = lambda *a, **k: []
         try:
             ok = try_reviewer_automation(
@@ -568,11 +568,11 @@ class TestDeterministicAutoApproveAllowlist(unittest.TestCase):
 
         paths = {"docs/only.md"}
         orig = eg.agent_denied_paths_successful
-        eg.agent_denied_paths_successful = lambda _h: True
+        eg.agent_denied_paths_successful = lambda _h, **_: True
         try:
             self.assertTrue(
                 deterministic_auto_approve_eligible(paths, CFG, HEAD, DENIED))
-            eg.agent_denied_paths_successful = lambda _h: False
+            eg.agent_denied_paths_successful = lambda _h, **_: False
             self.assertFalse(
                 deterministic_auto_approve_eligible(paths, CFG, HEAD, DENIED))
         finally:

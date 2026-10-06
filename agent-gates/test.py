@@ -26,6 +26,7 @@ REVIEWER_BOT = "fabricbloc-reviewer[bot]"
 REVIEWER_BOT_ID = 337673700
 VERDICT_BOT = "fabricbloc-verdict[bot]"
 VERDICT_BOT_ID = 337980250
+GITHUB_ACTIONS_APP_ID = 15368
 
 
 def validate_required_gate_hosted_only(name, doc):
@@ -1366,6 +1367,11 @@ class T(unittest.TestCase):
         mint_if = mint.get("if") or ""
         self.assertIn("pull_request_target", mint_if)
         self.assertIn("owner-approved", mint_if)
+        self.assertIn("issue_comment", mint_if)
+        self.assertIn(VERDICT_BOT, mint_if)
+        issue_types = (on.get("issue_comment") or {}).get("types") or []
+        self.assertIn("created", issue_types)
+        self.assertGreaterEqual(int(mint.get("timeout-minutes") or 0), 10)
         gate_step = gate["steps"][0]
         gate_env = gate_step.get("env") or {}
         self.assertEqual(gate_env.get("ROR_JOB"), "gate")
@@ -2021,6 +2027,167 @@ class T(unittest.TestCase):
         for handle in ns["GOV_HUMAN_HANDLES"]:
             for typ in ns["HUMAN_BRANCH_TYPES"]:
                 self.assertIn(f"refs/heads/{handle}/{typ}/**", exc)
+
+
+class TestMintDeniedPathsPoll(unittest.TestCase):
+    """Mint path waits for agent-denied-paths (GitHub Actions app 15368) before App APPROVE."""
+
+    def _poll_env(self):
+        return {
+            "DENIED_PATHS_POLL_INTERVAL_SEC": "0",
+            "DENIED_PATHS_POLL_TIMEOUT_SEC": "1",
+        }
+
+    def _run_denied_paths_check(self, eg, *, head=HEAD, pr_number="7", wait=True, check_runs_state):
+        """check_runs_state: list of check_runs payloads returned on successive API reads."""
+        state = {"i": 0, "heads": {str(pr_number): head}}
+
+        class FakeResp:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def read(self):
+                return json.dumps(self._payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        def fake_urlopen(req, timeout=30):
+            url = req.full_url if hasattr(req, "full_url") else req.get_full_url()
+            path = urllib.parse.urlparse(url).path
+            if path.endswith(f"/pulls/{pr_number}"):
+                live = state["heads"][str(pr_number)]
+                return FakeResp({"head": {"sha": live}})
+            if f"/commits/{head}/check-runs" in path:
+                idx = min(state["i"], len(check_runs_state) - 1)
+                state["i"] += 1
+                runs = check_runs_state[idx]
+                if callable(runs):
+                    runs = runs()
+                return FakeResp({"check_runs": runs})
+            raise AssertionError(f"unexpected urlopen {path}")
+
+        orig_repo, orig_token = eg.REPO, eg.TOKEN
+        orig_open = eg.urllib.request.urlopen
+        orig_sleep = eg.time.sleep
+        eg.REPO = "BloclabsHQ/fabricbloc"
+        eg.TOKEN = "test"
+        eg.urllib.request.urlopen = fake_urlopen
+        eg.time.sleep = lambda _s: None
+        env = dict(os.environ)
+        env.update(self._poll_env())
+        for k, v in env.items():
+            os.environ[k] = v
+        try:
+            return eg.agent_denied_paths_successful(
+                head, wait_denied_paths=wait, pr_number=pr_number
+            )
+        finally:
+            eg.urllib.request.urlopen = orig_open
+            eg.time.sleep = orig_sleep
+            eg.REPO, eg.TOKEN = orig_repo, orig_token
+
+    def _ga_run(self, *, status="completed", conclusion="success", run_id=1):
+        return {
+            "name": "agent-denied-paths",
+            "status": status,
+            "conclusion": conclusion,
+            "app": {"id": GITHUB_ACTIONS_APP_ID, "slug": "github-actions"},
+            "started_at": "2026-10-05T12:00:00Z",
+            "id": run_id,
+        }
+
+    def test_in_progress_then_success_proceeds(self):
+        import embedded_gate as eg
+
+        ok = self._run_denied_paths_check(
+            eg,
+            check_runs_state=[
+                [self._ga_run(status="in_progress", conclusion=None)],
+                [self._ga_run(status="completed", conclusion="success")],
+            ],
+        )
+        self.assertTrue(ok)
+
+    def test_in_progress_then_failure_fails_closed(self):
+        import embedded_gate as eg
+
+        ok = self._run_denied_paths_check(
+            eg,
+            check_runs_state=[
+                [self._ga_run(status="in_progress", conclusion=None)],
+                [self._ga_run(status="completed", conclusion="failure")],
+            ],
+        )
+        self.assertFalse(ok)
+
+    def test_never_completes_before_timeout_fails_closed(self):
+        import embedded_gate as eg
+
+        ok = self._run_denied_paths_check(
+            eg,
+            check_runs_state=[[self._ga_run(status="in_progress", conclusion=None)]] * 20,
+        )
+        self.assertFalse(ok)
+
+    def test_head_changes_mid_poll_fails_closed(self):
+        import embedded_gate as eg
+
+        new_head = "n" * 40
+        state = {"i": 0, "heads": {"7": HEAD}}
+
+        class FakeResp:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def read(self):
+                return json.dumps(self._payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        def fake_urlopen(req, timeout=30):
+            url = req.full_url if hasattr(req, "full_url") else req.get_full_url()
+            path = urllib.parse.urlparse(url).path
+            if path.endswith("/pulls/7"):
+                if state["i"] == 0:
+                    state["heads"]["7"] = HEAD
+                else:
+                    state["heads"]["7"] = new_head
+                state["i"] += 1
+                return FakeResp({"head": {"sha": state["heads"]["7"]}})
+            if f"/commits/{HEAD}/check-runs" in path:
+                return FakeResp({"check_runs": [self._ga_run(status="in_progress", conclusion=None)]})
+            raise AssertionError(path)
+
+        orig_open = eg.urllib.request.urlopen
+        orig_sleep = eg.time.sleep
+        eg.urllib.request.urlopen = fake_urlopen
+        eg.time.sleep = lambda _s: None
+        os.environ.update(self._poll_env())
+        try:
+            ok = eg.agent_denied_paths_successful(
+                HEAD, wait_denied_paths=True, pr_number="7"
+            )
+        finally:
+            eg.urllib.request.urlopen = orig_open
+            eg.time.sleep = orig_sleep
+        self.assertFalse(ok)
+
+    def test_mint_job_env_sets_poll_defaults(self):
+        doc = yaml.safe_load((WF / "agent-review-of-record.yml").read_text())
+        mint = (doc.get("jobs") or {}).get("reviewer-app-auto-approve") or {}
+        mint_run = [s for s in mint["steps"] if s.get("env", {}).get("ROR_JOB") == "mint"][0]
+        env = mint_run.get("env") or {}
+        self.assertEqual(env.get("DENIED_PATHS_POLL_INTERVAL_SEC"), "10")
+        self.assertEqual(env.get("DENIED_PATHS_POLL_TIMEOUT_SEC"), "300")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
