@@ -676,8 +676,44 @@ class T(unittest.TestCase):
             self.assertEqual(code, 1, out)
             self.assertIn("allowed_label_apps", out)
             self.assertIn("owner-approved label event audit:", out)
-            self.assertIn("performed_via_github_app=", out)
+            self.assertIn("performed_via_github_app=id=1210556 slug='cursor'", out)
             self.assertIn("42707764", out)
+
+    def test_owner_approval_human_then_cursor_relabel_fails(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(
+                owner_approved_labeled(created_at="2026-10-05T10:00:00Z"),
+                owner_approved_labeled(
+                    created_at="2026-10-05T11:00:00Z",
+                    performed_via_github_app={"id": 1210556, "slug": "cursor"},
+                ),
+            ),
+            push_activity=[push_activity_entry(pushed_at="2026-10-05T09:30:00Z")],
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("allowed_label_apps", out)
+
+    def test_owner_approval_timeline_uses_created_at_not_api_order(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(
+                owner_approved_labeled(
+                    created_at="2026-10-05T11:00:00Z",
+                    performed_via_github_app={"id": 1210556, "slug": "cursor"},
+                ),
+                owner_approved_labeled(created_at="2026-10-05T12:00:00Z"),
+            ),
+            push_activity=[push_activity_entry(pushed_at="2026-10-05T10:30:00Z")],
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 0, out)
+        self.assertIn("performed_via_github_app=none", out)
 
     def test_owner_approval_allowed_github_app_passes(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())

@@ -1,0 +1,13 @@
+# Gate config and canon pins — require human review before merge to main.
+# TODO: add @BloclabsHQ/sentinel (or security team handle) when confirmed for rulesets/.
+# Fleet gates do not run on this repo (SELF_REPO skip); merged JSON at pins.agent_gates_sha is live for the org without a separate org apply.
+
+/rulesets/ @Madgeniusblink
+/rulesets/canon.json @Madgeniusblink
+/rulesets/gate-owners.json @Madgeniusblink
+/rulesets/reviewers.json @Madgeniusblink
+
+# Pinned org required workflows (canon-agent-gates); script changes need org apply of 24445414.
+/.github/workflows/agent-denied-paths.yml @Madgeniusblink
+/.github/workflows/agent-review-of-record.yml @Madgeniusblink
+/.github/workflows/gate-issue-link.yml @Madgeniusblink

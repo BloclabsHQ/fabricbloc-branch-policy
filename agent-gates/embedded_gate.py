@@ -706,14 +706,21 @@ def gate_owner_identity_matches(actor, owners):
     return False
 
 
+def format_label_app_audit(app):
+    if not app:
+        return "none"
+    aid = app.get("id")
+    slug = (app.get("slug") or "?")
+    return f"id={aid} slug={slug!r}"
+
+
 def print_owner_label_event_audit(labeled_event):
-    """Log label timeline actor + App metadata for AG-06 audit (pass or fail)."""
+    """Log newest label timeline actor + App metadata for AG-06 audit (pass or fail)."""
     actor = (labeled_event or {}).get("actor") or {}
     login = (actor.get("login") or "?")
     uid = actor.get("id")
     uid_s = uid if uid is not None else "?"
-    app = (labeled_event or {}).get("performed_via_github_app")
-    app_s = "none" if not app else repr(app)
+    app_s = format_label_app_audit((labeled_event or {}).get("performed_via_github_app"))
     print(
         f"{MODE}: owner-approved label event audit: "
         f"actor login={login!r} id={uid_s} performed_via_github_app={app_s}"
@@ -759,6 +766,23 @@ def paginate_issue_events(repo, number):
     return out
 
 
+def label_event_created_at(ev):
+    """Sort key for label timeline events (issue API order is not guaranteed)."""
+    value = (ev.get("created_at") or "").strip()
+    if not value:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    s = value
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def owner_approved_label_timeline(events, label_name):
     needle = (label_name or "").strip().lower()
     if not needle:
@@ -770,6 +794,7 @@ def owner_approved_label_timeline(events, label_name):
         name = ((ev.get("label") or {}).get("name") or "").strip().lower()
         if name == needle:
             out.append(ev)
+    out.sort(key=label_event_created_at)
     return out
 
 
