@@ -1,6 +1,14 @@
 # PR-D2 — GOV-0033 D1 amendment (agent App approval)
 
-**Status:** **Approved** — do not apply live until org-owner apply after merge (same as all canon).
+**Status:** **Approved** — founder decision **#11** (Cris 2026-10-04 7:56 PM PT) stands.
+
+## Status: HELD (2026-10-05)
+
+The **`pull_request`** rule with **`required_approving_review_count: 1`** is **not applied live** on org ruleset **24445414** (workflows-only). In **`rulesets/canon.json`**, the rule body lives under **`canon-agent-gates`** **`_held_rules`** (stripped before apply), not in **`rules`**, so a full-body org apply matches live and does not introduce the rule.
+
+**Why held:** Owner-only agent PRs (author **madgeniusblink**, Cris-only paths) would **deadlock** if org count 1 were enforced: **AG-06** **`owner-approved`** clears **`agent-denied-paths`** and **`agent-review-of-record`**, but the author cannot self-approve, and **`reviewer-app-auto-approve`** refuses Cris-only diffs — no native **APPROVE** counts toward the org review requirement.
+
+**Re-enable when:** (a) **fabricbloc-reviewer** App submits **APPROVE** when a valid **AG-06** **`owner-approved`** label is present at head, and (b) **Cris** confirms. See **DECISIONS #17** and **`docs/owner-approved-agent-gates.md`**.
 
 ## Cris approval (record)
 

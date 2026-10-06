@@ -16,7 +16,7 @@
     "_note": "Public source: a public workflow may run on any repository in the org, so no Actions 'Access' setting is needed."
   },
   "pins": {
-    "agent_gates_sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf",
+    "agent_gates_sha": "093f61dbb9a7e7fb260fd992eceb56acf4ca49ee",
     "branch_name_guard_sha": "80ee4b19ad84f4cdb5dc1e923e19f54fc54a2c6a",
     "hygiene_sha": "06cfa0c886579256acdf260cc650f04bcb3371fe",
     "_note": "Every workflows-rule sha must equal one of these. Re-pinning = human PR to this file + org-owner apply. A push to policy-repo main alone changes nothing that runs. hygiene_sha is the L3 pin for hygiene reusable workflows on this commit. issue_link_enforce_after: warn-only until this UTC instant; set org/repo var ISSUE_LINK_ENFORCE_AFTER to match before apply (var may only move earlier).",
@@ -37,7 +37,8 @@
           "include": [
             "fabricbloc",
             "context",
-            "keyflo-session-issuer"
+            "keyflo-session-issuer",
+            "fabric-wallet"
           ],
           "exclude": [],
           "protected": true
@@ -54,28 +55,9 @@
       },
       "bypass_actors": [],
       "_bypass_note": "Empty on purpose (decision F6-D2). No standing bypass on canon-agent-gates: break-glass is an org owner sets enforcement to Disabled (org audit log); fabricbloc cursor-env drift opens an issue while disabled. The gates pass at once for GOV-0022 human PRs to main, so nobody needs a bypass. An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
-      "_pull_request_note": "GOV-0033 D1 amended (PR-D2, Cris 2026-10-04 7:56 PM PT): one GitHub approving review on merge bases in ref_name.include. GitHub org rulesets cannot scope review count to agent head refs only — see docs/PR-D2-gov-0033-d1-amendment.md. Agent PRs: satisfied by fabricbloc-reviewer App (337673700) after PR-C verdict + agent-review-of-record. Human GOV-0022 PRs: gates skip (F6-D2/D3); any eligible human APPROVE satisfies the org count (not Cris-only). Repo rulesets (main-required-ci, etc.) keep required_approving_review_count: 0 on their pull_request blocks; org + repo rules aggregate on the same base ref.",
-      "rules": [
-        {
-          "type": "workflows",
-          "parameters": {
-            "do_not_enforce_on_create": true,
-            "workflows": [
-              {
-                "repository_id": 1349282028,
-                "path": ".github/workflows/agent-denied-paths.yml",
-                "ref": "refs/heads/main",
-                "sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf"
-              },
-              {
-                "repository_id": 1349282028,
-                "path": ".github/workflows/agent-review-of-record.yml",
-                "ref": "refs/heads/main",
-                "sha": "ed19bddc0c79cd96349ec88a317a80b6743e61cf"
-              }
-            ]
-          }
-        },
+      "_pull_request_note": "PR-D2 (GOV-0033 D1 amendment, Cris 2026-10-04 7:56 PM PT) founder yes is preserved in `_held_rules` — not in `rules` and not live on org ruleset 24445414 as of 2026-10-05 (workflows-only). See `_held_note`, docs/PR-D2-gov-0033-d1-amendment.md, DECISIONS #17.",
+      "_held_note": "PR-D2 `pull_request` required_approving_review_count: 1 is held (stripped before apply). Live 24445414 = required workflows only. A full-body apply that promoted this rule would deadlock owner-only agent PRs (e.g. fabricbloc #1586): AG-06 owner-approved clears agent-denied-paths and agent-review-of-record, but the author cannot self-approve and reviewer-app-auto-approve refuses Cris-only diffs, so no native APPROVE satisfies org count 1. Re-enable `_held_rules` into `rules` only after (a) fabricbloc-reviewer App submits APPROVE when a valid AG-06 owner-approved label is present at head, and (b) Cris confirms.",
+      "_held_rules": [
         {
           "type": "pull_request",
           "parameters": {
@@ -86,13 +68,44 @@
             "required_review_thread_resolution": false
           }
         }
-      ]
+      ],
+      "_live_drift": "Desktop read 2026-10-05 (MadAgentPM): live org ruleset 24445414 Active, no bypass; repository_name.include is fabricbloc, context, keyflo-session-issuer only (fabric-wallet needs a separate org apply). Required workflows live: agent-denied-paths + agent-review-of-record pinned @ ff3c7c8 — no gate-issue-link. Staged (unsaved) Cris apply would re-pin both gates to pins.agent_gates_sha (093f61db) and add gate-issue-link; it does not add fabric-wallet to targets.",
+      "rules": [
+        {
+          "type": "workflows",
+          "parameters": {
+            "do_not_enforce_on_create": true,
+            "workflows": [
+              {
+                "repository_id": 1349282028,
+                "path": ".github/workflows/agent-denied-paths.yml",
+                "ref": "refs/heads/main",
+                "sha": "093f61dbb9a7e7fb260fd992eceb56acf4ca49ee"
+              },
+              {
+                "repository_id": 1349282028,
+                "path": ".github/workflows/agent-review-of-record.yml",
+                "ref": "refs/heads/main",
+                "sha": "093f61dbb9a7e7fb260fd992eceb56acf4ca49ee"
+              },
+              {
+                "repository_id": 1349282028,
+                "path": ".github/workflows/gate-issue-link.yml",
+                "ref": "refs/heads/main",
+                "sha": "093f61dbb9a7e7fb260fd992eceb56acf4ca49ee"
+              }
+            ]
+          }
+        }
+      ],
+      "_rollout_note": "PR-D (#51): fabric-wallet + gate-issue-link.yml. Org apply must use pins.agent_gates_sha that includes fabric-wallet in embedded_gate TARGET_REPOS (post\u2013#51 merge squash on main; not live ed19bdd alone). Batch with any #59 re-pin per Madgeniusblink 2026-10-04 hold note."
     },
     {
       "name": "canon-wallet-green-ci",
       "_finding": "Warden: fabric-wallet merged to dev/main while CI red or pending (#1433, #1435). Founder yes WALLET-GREEN-CI recorded 2026-10-05 01:01 PT (Cris via MadGeniusBot).",
       "_apply_after": "Done (2026-10-05 PT): policy PR #47 merged (06cfa0c); MadGeniusBot applied live org ruleset 24489464 on fabric-wallet",
       "_live_ruleset_id": 24489464,
+      "_live_drift": "Desktop read 2026-10-05 (MadAgentPM): org ruleset 24489464 Active on fabric-wallet dev+main; pull_request required_approving_review_count 0 matches on fields read (targets, refs, review count).",
       "_comment": "Org ruleset scoped by repository_name.include (add repo short names to extend). Job-level skips in ci.yml report success when docs-only; do not add Detect changes as required.",
       "target": "branch",
       "enforcement": "active",
@@ -159,6 +172,7 @@
     {
       "name": "canon-branch-name-guard-pinned",
       "_founder_decision": "F6-D6",
+      "_live_drift": "MadAgentPM desktop read 2026-10-05: live org ruleset 21712689 (branch-name guard) is DISABLED, targets 33 repos, does not include fabricbloc. Canon body (F6-D6, skipped until founder apply) would Active-pin branch-name-guard on fabricbloc ~DEFAULT_BRANCH only — not the same ruleset id or scope.",
       "_comment": "Optional: the same F6 fix for GOV-0022 'guard / guard', which today runs through fabricbloc's own (PR-editable) thin caller pinned to a0139c0. After apply, drop 'guard / guard' from main-required-ci.",
       "target": "branch",
       "enforcement": "active",
@@ -200,6 +214,8 @@
     {
       "_repository": "fabricbloc",
       "name": "main-required-ci",
+      "_live_ruleset_id": 20436874,
+      "_live_drift": "MadAgentPM desktop read 2026-10-05: repo ruleset 20436874 Active on fabricbloc ~DEFAULT_BRANCH. Live: deletion + non_fast_forward + required_linear_history; required_status_checks strict off with six contexts (canon-check, github-check, guard / guard, catalog-code-guard, env-op-pattern-check, context-walk). Live has NO pull_request rule (PR/review policy comes from classic branch protection — see top-level _live_drift_notes id 79877078). Canon still declares pull_request (0 approvals, squash) and nine status contexts — intentional target body, not live parity.",
       "_comment": "Replaces the hand-made live ruleset of the same name. F6 change vs the cursor-env draft: agent-denied-paths and agent-review-of-record are REMOVED from required_status_checks (now 9 contexts). They are enforced by canon-agent-gates, because a context check is satisfied by ANY Actions job with that name, including one the PR adds.",
       "_apply_after": "README step 6 (only once canon-agent-gates is live on ~DEFAULT_BRANCH)",
       "target": "branch",
@@ -293,7 +309,7 @@
       "_repository": "fabricbloc",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B. Stops agents from creating a fresh ungated base branch (for example f6-gate-retarget-probe).",
-      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). dependabot/** is blocked until fabricbloc has dependabot.yml and a ruling re-adds the exemption. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Branch ruleset scoped with ref_name.include refs/heads/** (this repo does not use ~ALL). exclude: main, agent/**, and GOV-0022 human-handle paths refs/heads/<handle>/<type>/** for each handle in GOV_HUMAN_HANDLES (embedded_gate.py / manifest operators.members_expected). dependabot/** is blocked until fabricbloc has dependabot.yml and a ruling re-adds the exemption. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -329,7 +345,7 @@
       "_repository": "context",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B on BloclabsHQ/context (default branch main).",
-      "_comment": "Same shape as fabricbloc: block branch creation outside main, agent/**, and GOV-0022 handle paths. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Same shape as fabricbloc: block branch creation outside main, agent/**, and GOV-0022 handle paths. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -365,7 +381,7 @@
       "_repository": "keyflo-session-issuer",
       "name": "canon-branch-creation-restricted",
       "_finding": "Finding (c) layer B on BloclabsHQ/keyflo-session-issuer (default branch dev).",
-      "_comment": "Same as fabricbloc plus refs/heads/dev (repo default). Agent merge bases remain dev and main via canon-agent-gates. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "Same as fabricbloc plus refs/heads/dev (repo default). Agent merge bases remain dev and main via canon-agent-gates. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -402,7 +418,7 @@
       "_repository": "fabricbloc",
       "name": "canon-deploy-branches-human-only",
       "_finding": "Finding (c). release/** and prod/** creation and direct updates are human-only (org admin break-glass).",
-      "_comment": "release/** and prod/** creation and direct updates are human-only. No standing bypass — break-glass: set enforcement Disabled (org audit log).",
+      "_comment": "release/** and prod/** creation and direct updates are human-only. No standing bypass \u2014 break-glass: set enforcement Disabled (org audit log).",
       "target": "branch",
       "enforcement": "active",
       "conditions": {
@@ -594,6 +610,15 @@
         }
       ],
       "_rules_note": "'update' with OrganizationAdmin (pull_request mode) as the only bypass: only org admins can change main, and only through a PR. No App or non-admin collaborator can."
+    }
+  ],
+  "_live_drift_notes": [
+    {
+      "repository": "BloclabsHQ/fabricbloc",
+      "ref": "refs/heads/main",
+      "live_id": 79877078,
+      "kind": "classic_branch_protection",
+      "_note": "Desktop read 2026-10-05 (MadAgentPM): classic branch protection on main (not modeled in canon.json). PR required; required_approving_review_count 0; dismiss_stale_reviews_on_push, require_code_owner_reviews, require_last_push_approval off; allow specified actors to bypass required pull requests on; require status checks on; enforce_admins on. Aggregates with repo ruleset main-required-ci 20436874 (which has no pull_request rule live)."
     }
   ]
 }

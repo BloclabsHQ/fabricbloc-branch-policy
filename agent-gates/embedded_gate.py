@@ -5,11 +5,13 @@
 # commit. Python stdlib only. Any API error or ambiguity fails closed.
 import fnmatch
 import json, os, re, sys, urllib.error, urllib.parse, urllib.request
+from datetime import datetime, timezone
 SELF_REPO = "BloclabsHQ/fabricbloc-branch-policy"
 TARGET_REPOS = {
     "BloclabsHQ/fabricbloc",
     "BloclabsHQ/context",
     "BloclabsHQ/keyflo-session-issuer",
+    "BloclabsHQ/fabric-wallet",
 }
 DEFAULT_BASE_REF = "main"
 MANIFEST = "agents/runtime/engine/policy/cursor-env/manifest.json"
@@ -77,7 +79,11 @@ VERDICT_RE = re.compile(
 )
 CODE_FENCE_RE = re.compile(r"```(?:[^\n]*\n)?.*?```", re.DOTALL)
 REVIEWERS_JSON = "rulesets/reviewers.json"
+GATE_OWNERS_JSON = "rulesets/gate-owners.json"
 CANON_JSON = "rulesets/canon.json"
+MAX_ISSUE_EVENTS = 10000
+MAX_ACTIVITY_PAGES = 5
+LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 MAX_ISSUE_COMMENTS = 10000
 HUMAN_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?)/(feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style)/[a-z0-9]+(-[a-z0-9]+)*$")
 _BOT_TYPES = "feat|fix|chore|docs|refactor|test|ci|perf|revert|build|style"
@@ -186,6 +192,49 @@ def call(path, accept="application/vnd.github+json", allow_404=False, method="GE
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         fail(f"GitHub API unreachable ({type(exc).__name__}); failing closed")
     return body if accept.endswith(".raw") else json.loads(body or "null")
+
+
+def call_list_with_link(path, allow_404=False):
+    """GET JSON list; return (parsed_list_or_none, Link header)."""
+    headers = {
+        "Authorization": f"Bearer {TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "fabricbloc-agent-gates",
+    }
+    req = urllib.request.Request(API + path, method="GET", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            link = resp.headers.get("Link")
+            raw = resp.read().decode()
+    except urllib.error.HTTPError as exc:
+        if allow_404 and exc.code == 404:
+            return None, None
+        fail(f"GitHub API {exc.code} on {path.split('?')[0]}; failing closed")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        fail(f"GitHub API unreachable ({type(exc).__name__}); failing closed")
+    data = json.loads(raw or "null")
+    if not isinstance(data, list):
+        fail(f"unexpected API shape for {path.split('?')[0]} (expected list)")
+    return data, link
+
+
+def activity_next_path(link_header):
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        piece = part.strip()
+        if 'rel="next"' not in piece:
+            continue
+        m = LINK_NEXT_RE.search(piece)
+        if not m:
+            continue
+        parsed = urllib.parse.urlparse(m.group(1))
+        api_host = urllib.parse.urlparse(API).netloc
+        if parsed.netloc and api_host and parsed.netloc != api_host:
+            fail("repository activity Link next URL leaves API host; failing closed")
+        return parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    return None
 
 
 def paginate(path, cap, fail_at_cap=False):
@@ -517,6 +566,257 @@ def load_reviewers_config():
     return policy_repo_file(REVIEWERS_JSON, ref)
 
 
+def load_gate_owners_config():
+    """Never read gate-owners.json from the PR head; use pinned policy SHA or main."""
+    ref = policy_reviewers_ref()
+    q = urllib.parse.quote(GATE_OWNERS_JSON)
+    raw = call(
+        f"/repos/{SELF_REPO}/contents/{q}?ref={ref}",
+        accept="application/vnd.github.raw",
+        allow_404=True,
+    )
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        fail(f"{GATE_OWNERS_JSON} on {SELF_REPO}@{ref[:12]} is not valid JSON")
+
+
+def parse_rfc3339(value, label):
+    if not value or not isinstance(value, str):
+        fail(f"{label}: missing timestamp")
+    s = value.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        fail(f"{label}: invalid ISO-8601 timestamp {value!r}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def activity_entry_after_sha(entry, head_sha):
+    sha = head_sha.lower()
+    candidates = []
+    for key in ("after", "head"):
+        val = entry.get(key)
+        if isinstance(val, str):
+            candidates.append(val.lower())
+    payload = entry.get("payload") or {}
+    for key in ("after", "head"):
+        val = payload.get(key)
+        if isinstance(val, str):
+            candidates.append(val.lower())
+    return sha in candidates
+
+
+def activity_entry_push_timestamp(entry):
+    """Repository activity uses `timestamp` (not commit author/committer dates)."""
+    val = entry.get("timestamp")
+    if isinstance(val, str) and val.strip():
+        return val.strip()
+    return None
+
+
+def head_push_time_from_activity(repo, head_ref, head_sha):
+    ref_param = f"refs/heads/{head_ref}"
+    qref = urllib.parse.quote(ref_param, safe="")
+    path = f"/repos/{repo}/activity?per_page=100&direction=desc&ref={qref}"
+    next_path = path
+    pages = 0
+    while next_path and pages < MAX_ACTIVITY_PAGES:
+        batch, link = call_list_with_link(next_path, allow_404=(pages == 0))
+        if batch is None:
+            return None
+        for item in batch:
+            if activity_entry_after_sha(item, head_sha):
+                ts = activity_entry_push_timestamp(item)
+                if ts:
+                    return ts
+        next_path = activity_next_path(link)
+        pages += 1
+    return None
+
+
+def resolve_head_push_time(repo, head_ref, head_sha):
+    ts = head_push_time_from_activity(repo, head_ref, head_sha)
+    if ts:
+        return ts, "activity"
+    return None, None
+
+
+def label_app_allowed(app_obj, allowed_entries):
+    if not app_obj:
+        return True
+    if not allowed_entries:
+        return False
+    try:
+        app_id = int(app_obj.get("id")) if app_obj.get("id") is not None else None
+    except (TypeError, ValueError):
+        app_id = None
+    slug = ((app_obj.get("slug") or "") or "").strip().lower()
+    for entry in allowed_entries:
+        if isinstance(entry, bool):
+            continue
+        if isinstance(entry, int):
+            if app_id is not None and entry == app_id:
+                return True
+            continue
+        if isinstance(entry, str):
+            s = entry.strip()
+            if s.isdigit():
+                if app_id is not None and int(s) == app_id:
+                    return True
+            elif slug and s.lower() == slug:
+                return True
+            continue
+        if isinstance(entry, dict):
+            try:
+                eid = int(entry.get("id")) if entry.get("id") is not None else None
+            except (TypeError, ValueError):
+                eid = None
+            eslug = (entry.get("slug") or "").strip().lower()
+            if eid is not None and app_id is not None and eid == app_id:
+                return True
+            if eslug and slug and eslug == slug:
+                return True
+    return False
+
+
+def gate_owner_identity_matches(actor, owners):
+    login = ((actor or {}).get("login") or "").strip().lower()
+    uid = (actor or {}).get("id")
+    if not login or uid is None:
+        return False
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return False
+    for entry in owners or []:
+        elogin = (entry.get("login") or "").strip().lower()
+        try:
+            euid = int(entry.get("user_id"))
+        except (TypeError, ValueError):
+            continue
+        if login == elogin and uid == euid:
+            return True
+    return False
+
+
+def gate_owner_label_actor_ok(actor, labeled_event, owners_cfg):
+    """Gate owner User; GitHub App labels only when app is in allowed_label_apps."""
+    login = ((actor or {}).get("login") or "").strip()
+    if login.lower().endswith("[bot]"):
+        return False, f"label actor {login!r} is a bot login"
+    actor_type = ((actor or {}).get("type") or "").strip()
+    if actor_type and actor_type.lower() != "user":
+        return False, f"label actor type {actor_type!r} is not User"
+    app = labeled_event.get("performed_via_github_app")
+    if app:
+        allowed = (owners_cfg or {}).get("allowed_label_apps") or []
+        if not label_app_allowed(app, allowed):
+            return False, (
+                f"label GitHub App {app!r} not in allowed_label_apps "
+                f"(configured {len(allowed)} entries)"
+            )
+        print(f"{MODE}: owner-approved label performed_via_github_app={app!r}")
+    return True, None
+
+
+def paginate_issue_events(repo, number):
+    out = []
+    page = 1
+    while True:
+        batch = call(
+            f"/repos/{repo}/issues/{number}/events?per_page=100&page={page}"
+        )
+        if not isinstance(batch, list):
+            fail("unexpected issue events shape")
+        out.extend(batch)
+        if len(out) >= MAX_ISSUE_EVENTS:
+            if len(batch) == 100:
+                fail(f"issue events exceed cap {MAX_ISSUE_EVENTS}; failing closed")
+            break
+        if len(batch) < 100:
+            break
+        page += 1
+    return out
+
+
+def owner_approved_label_timeline(events, label_name):
+    needle = (label_name or "").strip().lower()
+    if not needle:
+        return []
+    out = []
+    for ev in events:
+        if ev.get("event") not in ("labeled", "unlabeled"):
+            continue
+        name = ((ev.get("label") or {}).get("name") or "").strip().lower()
+        if name == needle:
+            out.append(ev)
+    return out
+
+
+def owner_approval_valid_for_head(repo, number, head, head_ref, owners_cfg):
+    """Return (True, detail) when label owner-approved is audited for current head."""
+    label = (owners_cfg.get("owner_approved_label") or "owner-approved").strip()
+    owners = owners_cfg.get("gate_owners") or []
+    if not owners:
+        return False, "gate_owners empty in gate-owners.json"
+    labels = call(f"/repos/{repo}/issues/{number}/labels")
+    if not isinstance(labels, list):
+        fail("unexpected PR labels shape")
+    present = {(lab.get("name") or "").strip().lower() for lab in labels}
+    if label.lower() not in present:
+        return False, f"label {label!r} not present on PR"
+    events = paginate_issue_events(repo, number)
+    timeline = owner_approved_label_timeline(events, label)
+    if not timeline:
+        return False, f"no labeled/unlabeled timeline for {label!r}"
+    newest = timeline[-1]
+    if newest.get("event") != "labeled":
+        return False, f"newest {label!r} timeline event is unlabeled"
+    actor = newest.get("actor") or {}
+    ok_actor, actor_reason = gate_owner_label_actor_ok(actor, newest, owners_cfg)
+    if not ok_actor:
+        return False, actor_reason
+    if not gate_owner_identity_matches(actor, owners):
+        login = (actor.get("login") or "?")
+        return False, f"{label!r} labeled event actor {login!r} is not a configured gate owner"
+    labeled_at = newest.get("created_at") or ""
+    pushed_at, push_source = resolve_head_push_time(repo, head_ref, head)
+    if not pushed_at:
+        return False, (
+            "no repository activity push timestamp for current head "
+            f"(refs/heads/{head_ref}, after={head[:12]})"
+        )
+    labeled_dt = parse_rfc3339(labeled_at, "labeled_at")
+    pushed_dt = parse_rfc3339(pushed_at, "pushed_at")
+    if labeled_dt <= pushed_dt:
+        return False, (
+            f"owner label at {labeled_at} not after head push at {pushed_at} "
+            f"(source={push_source}); re-apply label after push"
+        )
+    who = (actor.get("login") or "owner")
+    return True, f"owner-approved for head {head[:12]} by {who} (push {push_source})"
+
+
+def owner_gate_passes(repo, number, head, head_ref):
+    cfg = load_gate_owners_config()
+    if cfg is None:
+        print(f"{MODE}: owner override not satisfied (gate-owners.json missing at pin)")
+        return False
+    ok, detail = owner_approval_valid_for_head(repo, number, head, head_ref, cfg)
+    if ok:
+        print(f"{MODE}: {detail} (AG-06 owner override)")
+        return True
+    print(f"{MODE}: owner override not satisfied ({detail})")
+    return False
+
+
 def normalize_repo_path(path):
     return (path or "").replace("\\", "/").lower()
 
@@ -591,8 +891,10 @@ def path_is_gov_decision(path):
     rest = norm[len(ARCH_DECISIONS_PREFIX):]
     if not rest:
         return False
-    first = rest.split("/")[0]
-    return first.startswith("gov-")
+    for segment in rest.split("/"):
+        if segment.lower().startswith("gov-"):
+            return True
+    return False
 
 
 def path_is_engine_verdict_eligible(path):
@@ -632,13 +934,13 @@ def classify_agent_path_tier(path, denied_entries):
         return "cris_only"
     if path_has_canon_json_basename(path) or path_has_approval_relay_segment(path):
         return "cris_only"
-    if path_matches_denied(path, denied_entries):
-        return "cris_only"
     norm = normalize_repo_path(path)
     if norm.startswith(ARCH_DECISIONS_PREFIX):
         if path_is_gov_decision(path):
             return "cris_only"
         return "verdict_eligible"
+    if path_matches_denied(path, denied_entries):
+        return "cris_only"
     if path_under_engine(path):
         if path_is_engine_cris_only(path):
             return "cris_only"
@@ -1114,11 +1416,19 @@ def main():
         verdict_eligible = sorted(
             p for p in paths if classify_agent_path_tier(p, denied) == "verdict_eligible"
         )
-        for p in cris_only:
-            print(
-                f"::error file={p}::Cris-only denied path for agent PRs "
-                "(ARCH-0048 / AG-04; needs Cris or admin bypass)"
-            )
+        if cris_only:
+            if owner_gate_passes(REPO, number, head, head_ref):
+                for p in cris_only:
+                    print(
+                        f"::notice file={p}::Cris-only path cleared by owner-approved (AG-06)"
+                    )
+                cris_only = []
+            else:
+                for p in cris_only:
+                    print(
+                        f"::error file={p}::Cris-only denied path for agent PRs "
+                        "(ARCH-0048 / AG-04; needs owner-approved label from gate owner or human branch)"
+                    )
         for p in verdict_eligible:
             print(
                 f"::notice file={p}::Verdict-eligible path "
@@ -1218,6 +1528,9 @@ def main():
         fail(f"open CHANGES_REQUESTED from {blocked}")
     ok = sorted(l for l, r in latest.items()
                 if approval_qualifies(r, head, allow, excluded, reviewer_bots))
+    if not ok and owner_gate_passes(REPO, number, head, head_ref):
+        print(f"{MODE}: owner override satisfies review-of-record at {head[:12]}")
+        return
     if not ok:
         if ror_job == "gate":
             fail(
