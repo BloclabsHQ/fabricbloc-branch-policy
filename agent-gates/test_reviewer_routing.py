@@ -231,7 +231,7 @@ class TestReviewerRouting(unittest.TestCase):
     def test_verdict_reviewers_decisions_plus_workflow_includes_sentinel(self):
         paths = {"DECISIONS.md", ".github/workflows/agent-denied-paths.yml"}
         required = required_verdict_reviewers(
-            paths, CFG, "BloclabsHQ/fabricbloc-branch-policy", "agent/warden/docs/x-y", DENIED)
+            paths, CFG, "BloclabsHQ/fabricbloc-branch-policy", "agent/session/docs/x-y", DENIED)
         self.assertIn("madagentpm", required)
         self.assertIn("warden", required)
         self.assertIn("sentinel", required)
