@@ -25,7 +25,7 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
 
 4. **Scope:** Clears **Cris-only** **`agent-denied-paths`** failures and satisfies **`agent-review-of-record`** without a GitHub **APPROVE**. **DECISIONS #16** **carves out** decision **#14**: **`madgeniusblink`** label approval counts for ROR **including madgeniusblink-authored PRs** when applied by **Cris through an accepted (non–App-mediated) label path** above. Does **not** override provider-control / projection hard-fails, open **CHANGES_REQUESTED**, or Sentinel security domains. **PR-D2** org **`required_approving_review_count: 1`** is **held** in canon (**`_held_rules`**, not live) until the App-APPROVE + **`owner-approved`** fix — **AG-06** alone does not satisfy a live org review count if that rule were applied.
 
-5. **Logging:** when **`performed_via_github_app`** is present on a label event, the gate logs the App payload (including rejections).
+5. **Logging (audit):** on every owner-override evaluation that reaches the label timeline, the gate prints **`owner-approved label event audit:`** with actor **login**, **id**, and **`performed_via_github_app`** (or **`none`**) — on pass and fail.
 
 6. **Missing config:** if **`gate-owners.json`** is absent at the pin, owner override is **not satisfied** (gates keep failing; not a workflow hard-fail).
 
@@ -33,10 +33,18 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
 
 If **chat approvals** must programmatically count as **`owner-approved`**, introduce a dedicated **approval-relay** GitHub App gated on Cris's Slack user **U083ZJDP9EC**, allowlist **only** that App's id in **`allowed_label_apps`**, and install/configure secrets under Cris control. That is a **separate** founder-gated change — not part of clearing gates via Cursor or shared fleet tokens.
 
+### Residual risk (live gate; identity — needs Cris)
+
+Org **`canon-agent-gates`** (**24445414**) @ policy pin **`093f61db`** is **already live** (saved **2026-10-05 ~5:55 PM PT**). This PR tightens **`allowed_label_apps`** to **`[]`** via re-pin after merge. **`[]`** blocks **Cursor App / GitHub API** labels (`performed_via_github_app` set) that any cloud agent can trigger.
+
+It does **not** block an agent driving a **browser** already signed in as **madgeniusblink** (no App marker on the label event). Prior **`owner-approved`** uses on fabricbloc (**#1586**, **#1600**, **#1594**, **#1577**, **#1572**, **#1542**, **#1541**, **#1517**, **#1531**) followed Cris's explicit chat approval per MadAgentPM; audit logs should be used to confirm **`performed_via_github_app=none`** vs App going forward.
+
+**Durable fix (out of scope):** identity separation — move fleet bots to a **machine user**; keep **madgeniusblink** sessions off bot/cloud-agent machines (**Cris credential / workstation policy**).
+
 ### ESC / edge cases
 
 - **Fork PRs** or repos where **repository activity** for `refs/heads/{head_ref}` does not expose a push with **`after == head`**: owner override cannot clear gates until activity is observable (re-label after push appears in activity, or merge from a human branch). Cross-branch check-suite timestamps do **not** substitute.
-- **Shared `madgeniusblink` PAT:** a label with no **`performed_via_github_app`** would pass the App check; fleet must not hold a PAT that agents can use to apply **`owner-approved`**.
+- **Shared `madgeniusblink` PAT or browser session:** a label with no **`performed_via_github_app`** passes the App allowlist check; fleet must not expose PAT or owner browser sessions to agents for **`owner-approved`**.
 
 ## Operator steps (fabricbloc example)
 
@@ -54,7 +62,7 @@ When this policy lands on **`fabricbloc-branch-policy`** `main`:
 2. **Org apply:** MadGeniusBot / Cris updates live org ruleset **24445414** from **`canon.json`** — **requires Cris yes** (same as every agent-gates re-pin).  
 3. Until re-pinned, fabricbloc still runs the previous gate SHA.
 
-**Do not** apply a staged org pin that still ships **`allowed_label_apps: [1210556]`** (e.g. **093f61db** before this fix); wait for the post-merge re-pin.
+Live org ruleset **24445414** currently loads **`gate-owners.json`** from pin **`093f61db`** (includes Cursor allowlist). **Re-pin after this merge** so production gates read **`allowed_label_apps: []`**.
 
 ## Proposal: relax Q14 push lock (not applied in this PR)
 

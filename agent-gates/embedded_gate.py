@@ -706,6 +706,20 @@ def gate_owner_identity_matches(actor, owners):
     return False
 
 
+def print_owner_label_event_audit(labeled_event):
+    """Log label timeline actor + App metadata for AG-06 audit (pass or fail)."""
+    actor = (labeled_event or {}).get("actor") or {}
+    login = (actor.get("login") or "?")
+    uid = actor.get("id")
+    uid_s = uid if uid is not None else "?"
+    app = (labeled_event or {}).get("performed_via_github_app")
+    app_s = "none" if not app else repr(app)
+    print(
+        f"{MODE}: owner-approved label event audit: "
+        f"actor login={login!r} id={uid_s} performed_via_github_app={app_s}"
+    )
+
+
 def gate_owner_label_actor_ok(actor, labeled_event, owners_cfg):
     """Gate owner User; GitHub App labels only when app is in allowed_label_apps."""
     login = ((actor or {}).get("login") or "").strip()
@@ -722,7 +736,6 @@ def gate_owner_label_actor_ok(actor, labeled_event, owners_cfg):
                 f"label GitHub App {app!r} not in allowed_label_apps "
                 f"(configured {len(allowed)} entries)"
             )
-        print(f"{MODE}: owner-approved label performed_via_github_app={app!r}")
     return True, None
 
 
@@ -777,6 +790,7 @@ def owner_approval_valid_for_head(repo, number, head, head_ref, owners_cfg):
     if not timeline:
         return False, f"no labeled/unlabeled timeline for {label!r}"
     newest = timeline[-1]
+    print_owner_label_event_audit(newest)
     if newest.get("event") != "labeled":
         return False, f"newest {label!r} timeline event is unlabeled"
     actor = newest.get("actor") or {}

@@ -522,6 +522,8 @@ class T(unittest.TestCase):
         code, out = run("agent-denied-paths")
         self.assertEqual(code, 0, out)
         self.assertIn("AG-06 owner override", out)
+        self.assertIn("owner-approved label event audit:", out)
+        self.assertIn("performed_via_github_app=none", out)
 
     def test_owner_approval_label_before_push_fails(self):
         setup(
@@ -672,6 +674,9 @@ class T(unittest.TestCase):
             code, out = run(wf)
             self.assertEqual(code, 1, out)
             self.assertIn("allowed_label_apps", out)
+            self.assertIn("owner-approved label event audit:", out)
+            self.assertIn("performed_via_github_app=", out)
+            self.assertIn("42707764", out)
 
     def test_owner_approval_allowed_github_app_passes(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
