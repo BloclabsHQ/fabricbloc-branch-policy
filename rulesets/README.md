@@ -37,6 +37,18 @@ The orphan `ledger` branch on fabricbloc (harvest/retention workflows, `agent-ru
 
 Validate: `python3 agent-gates/validate_canon.py` (checks every body against GitHub's OpenAPI schema). The apply-workflow spec is unchanged from the cursor-env draft: a company App with org `administration: write`, upsert by name, never delete, and dispatch `policy-applied` to fabricbloc. That App is never a bypass actor.
 
+## Live drift (2026-10-05)
+
+MadAgentPM read-only desktop audit. **Notes only** in `canon.json` (`_live_drift` on ruleset entries, `_live_drift_notes` for unmodeled live objects); enforced fields in `rules` unchanged.
+
+| Live object | Canon entry | Summary |
+|---|---|---|
+| Org `canon-agent-gates` **24445414** | `organization_rulesets` → `canon-agent-gates` | Workflows-only live; PR-D2 count-1 held in `_held_rules`. Live repo targets omit **fabric-wallet** until apply. |
+| Repo `main-required-ci` **20436874** (fabricbloc) | `repository_rulesets` → `main-required-ci` | Live: six status contexts, strict off, deletion/force-push/linear rules; **no** `pull_request` rule. Canon declares nine contexts + `pull_request`. |
+| Classic branch protection **79877078** (fabricbloc `main`) | *(none)* | `_live_drift_notes[0]`: PR required, 0 approvals, admin enforce, bypass-PR actors allowed. |
+| Org branch-name guard **21712689** | `canon-branch-name-guard-pinned` (F6-D6, not applied) | Live **DISABLED**, 33 repos, not fabricbloc. |
+| Org `canon-wallet-green-ci` **24489464** | `organization_rulesets` → `canon-wallet-green-ci` | **Matches** (dev+main, 0 review count). |
+
 ## Ruleset drift (live GitHub vs this file)
 
 Recorded deltas so cursor-env / manual audits do not treat intentional live state as surprise drift:
