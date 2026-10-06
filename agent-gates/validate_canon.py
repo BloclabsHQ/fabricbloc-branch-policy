@@ -30,18 +30,20 @@ def strip(o):
 
 
 def agent_gates_pin_ancestor_errors(canon, repo_root=None):
-    """pins.agent_gates_sha must be on main history (ancestor of main)."""
+    """Require a published pin, including in detached Actions checkouts."""
     pin = ((canon.get("pins") or {}).get("agent_gates_sha") or "").strip()
     if not re.fullmatch(r"[0-9a-f]{40}", pin):
         return [f"pins.agent_gates_sha must be a 40-char lowercase hex commit (got {pin[:20]!r}...)"]
     root = Path(repo_root) if repo_root else CANON_PATH.parent.parent
     r = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", pin, "main"],
+        ["git", "merge-base", "--is-ancestor", pin, "refs/remotes/origin/main"],
         cwd=root,
         capture_output=True,
     )
+    if r.returncode == 1:
+        return [f"pins.agent_gates_sha {pin} is not an ancestor of origin/main"]
     if r.returncode != 0:
-        return [f"pins.agent_gates_sha {pin} is not an ancestor of main"]
+        return ["cannot verify pins.agent_gates_sha ancestry; fetch origin/main with complete history"]
     return []
 
 
