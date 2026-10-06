@@ -652,15 +652,33 @@ class T(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("allowed_label_apps", out)
 
-    def test_gate_owners_json_seeds_cursor_github_app_id(self):
+    def test_gate_owners_json_does_not_allowlist_cursor_app(self):
         cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
-        self.assertIn(1210556, cfg.get("allowed_label_apps") or [])
+        allowed = cfg.get("allowed_label_apps") or []
+        self.assertNotIn(1210556, allowed)
+        self.assertEqual(allowed, [])
+
+    def test_owner_approval_cursor_app_correct_owner_fails_shipped_config(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(
+                performed_via_github_app={"id": 1210556, "slug": "cursor"},
+            ),),
+            push_activity=[push_activity_entry()],
+            **AGENT,
+        )
+        for wf in ("agent-denied-paths", "agent-review-of-record"):
+            code, out = run(wf)
+            self.assertEqual(code, 1, out)
+            self.assertIn("allowed_label_apps", out)
 
     def test_owner_approval_allowed_github_app_passes(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         pin = "cafebabecafebabecafebabecafebabecafebabe"
         canon.setdefault("pins", {})["agent_gates_sha"] = pin
         owners_cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
+        owners_cfg["allowed_label_apps"] = [1210556]
         setup(
             files=(".github/workflows/ci.yml",),
             issue_labels=("owner-approved",),
@@ -678,6 +696,11 @@ class T(unittest.TestCase):
         self.assertEqual(run("agent-review-of-record")[0], 0)
 
     def test_owner_approval_cursor_app_non_owner_fails(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        pin = "cafebabecafebabecafebabecafebabecafebabe"
+        canon.setdefault("pins", {})["agent_gates_sha"] = pin
+        owners_cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
+        owners_cfg["allowed_label_apps"] = [1210556]
         setup(
             files=(".github/workflows/ci.yml",),
             issue_labels=("owner-approved",),
@@ -687,6 +710,10 @@ class T(unittest.TestCase):
                 performed_via_github_app={"id": 1210556, "slug": "cursor"},
             ),),
             push_activity=[push_activity_entry()],
+            policy_routes_extra={
+                "extra_gate_owners_by_ref": {pin: owners_cfg},
+                "canon_override": canon,
+            },
             **AGENT,
         )
         for wf in ("agent-denied-paths", "agent-review-of-record"):
@@ -695,6 +722,11 @@ class T(unittest.TestCase):
             self.assertIn("not a configured gate owner", out)
 
     def test_owner_approval_cursor_app_wrong_user_id_fails(self):
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        pin = "cafebabecafebabecafebabecafebabecafebabe"
+        canon.setdefault("pins", {})["agent_gates_sha"] = pin
+        owners_cfg = json.loads((ROOT / "rulesets" / "gate-owners.json").read_text())
+        owners_cfg["allowed_label_apps"] = [1210556]
         setup(
             files=(".github/workflows/ci.yml",),
             issue_labels=("owner-approved",),
@@ -704,6 +736,10 @@ class T(unittest.TestCase):
                 performed_via_github_app={"id": 1210556, "slug": "cursor"},
             ),),
             push_activity=[push_activity_entry()],
+            policy_routes_extra={
+                "extra_gate_owners_by_ref": {pin: owners_cfg},
+                "canon_override": canon,
+            },
             **AGENT,
         )
         for wf in ("agent-denied-paths", "agent-review-of-record"):
