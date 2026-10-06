@@ -1262,12 +1262,7 @@ def _newest_github_actions_agent_denied_paths_run(head):
     ga_runs = _github_actions_agent_denied_paths_runs(head)
     if not ga_runs:
         return None
-    ga_runs.sort(
-        key=lambda r: (
-            r.get("started_at") or "1970-01-01T00:00:00Z",
-            r.get("id") or 0,
-        )
-    )
+    ga_runs.sort(key=lambda r: r.get("id") or 0)
     return ga_runs[-1]
 
 
@@ -1678,9 +1673,9 @@ def main():
         return
 
     # agent-review-of-record: ai_reviewers may approve; they never qualify for human skip.
-    ror_job = (os.environ.get("ROR_JOB") or "combined").strip().lower()
-    if ror_job not in ("gate", "mint", "combined"):
-        fail(f"unknown ROR_JOB {ror_job!r}")
+    ror_job = (os.environ.get("ROR_JOB") or "gate").strip().lower()
+    if ror_job not in ("gate", "mint"):
+        fail(f"ROR_JOB must be gate or mint for agent-review-of-record, got {ror_job!r}")
     allow = review_of_record_allowlist(humans, cfg, reviewer_bots)
     if not allow:
         fail("no reviewer allowlist at base (manifest operators.members_expected)")
@@ -1737,15 +1732,6 @@ def main():
                 f"no allowlisted, independent APPROVE at head {head[:12]}; "
                 "a new push needs a new review, then re-run this check"
             )
-        if run_reviewer_automation():
-            reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
-            latest = {}
-            for r in reviews:
-                login = (r.get("user") or {}).get("login")
-                if login and r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
-                    latest[login] = r
-            ok = sorted(l for l, r in latest.items()
-                        if approval_qualifies(r, head, allow, excluded, reviewer_bots))
         if not ok:
             fail(
                 f"no allowlisted, independent APPROVE at head {head[:12]}; "

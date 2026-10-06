@@ -27,9 +27,11 @@ Org **required workflows** (canon-agent-gates) run only on **`pull_request`**, *
 
 On each **`pull_request_target`** mint run, the gate **polls** (shared **240s** job budget) for **agent-denied-paths** success on head, then submits **fabricbloc-reviewer** APPROVE if verdict/deterministic rules pass and the App has not already APPROVED that head.
 
-If verdicts land **after** mint already finished without approving, mint runs again on the next **`pull_request_target`** event (`synchronize`, `reopened`, `edited`, or **`owner-approved`** label). Otherwise re-run the mint job manually (`gh run rerun --job <id>`).
+If verdicts land **after** mint already finished without approving, mint runs again only when GitHub starts a new **`pull_request_target`** run for an org-required event: **`opened`**, **`synchronize`**, or **`reopened`** (ruleset default types). **`edited`**, other label events, and **`owner-approved`** do **not** re-run org-required workflows, so they do **not** re-run mint on fabricbloc. Otherwise re-run the mint job manually (`gh run rerun --job <id>`).
 
-**Follow-up (Cris-gated):** a verdict posted after mint finished still does **not** start mint on fabricbloc today. The **fabricbloc-verdict** App has **Issues** and **Pull requests** write only (no **Actions** / **Checks**). Re-running **`reviewer-app-auto-approve`** from the verdict poster needs **`actions:write`** (or an equivalent workflow-dispatch path) on that App — not added in this change. Until then, use **`pull_request_target`** re-fire or manual mint job re-run.
+**Follow-up (Cris-gated):** a verdict posted after mint finished still does **not** start mint on fabricbloc today. The **fabricbloc-verdict** App has **Issues** and **Pull requests** write only (no **Actions** / **Checks**). Re-running **`reviewer-app-auto-approve`** from the verdict poster needs **`actions:write`** (or an equivalent workflow-dispatch path) on that App — not added in this change. Until then, use a new push (**`synchronize`**) / **`reopened`**, or manual mint job re-run (`gh run rerun --job`).
+
+**Mint job `issues: write` (GITHUB_TOKEN):** used only when mint evaluates a **cris-required** route and posts the routing issue comment before failing closed; the verdict/deterministic mint path does not post issue comments on failure.
 
 ## Routing (priority)
 
