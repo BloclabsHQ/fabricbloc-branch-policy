@@ -1,5 +1,5 @@
 {
-  "_comment": "Recorded owner override for agent gates (AG-06). Loaded from fabricbloc-branch-policy at pins.agent_gates_sha — never the PR head. allowed_label_apps 1210556 = Cursor GitHub App (MadAgentPM probe: throwaway gate-probe label on closed branch-policy PR #47, labeled 2026-10-05T23:42:15Z / unlabeled 23:42:22Z, actor madgeniusblink/42707764, performed_via_github_app id 1210556 slug cursor — not an owner-approved label event).",
+  "_comment": "Recorded owner override for agent gates (AG-06). Loaded from fabricbloc-branch-policy at pins.agent_gates_sha — never the PR head. allowed_label_apps is empty: owner-approved must be applied by Cris via GitHub web UI or a non-shared credential (no Cursor App / fleet tooling). Cursor App id 1210556 was probed on closed PR #47 (gate-probe label, not owner-approved) and must not satisfy AG-06.",
   "owner_approved_label": "owner-approved",
   "gate_owners": [
     {
@@ -7,5 +7,5 @@
       "user_id": 42707764
     }
   ],
-  "allowed_label_apps": [1210556]
+  "allowed_label_apps": []
 }
