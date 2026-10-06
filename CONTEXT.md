@@ -11,6 +11,7 @@ Policy-as-code for FabricBloc org gates and fleet rules. **Cite rule IDs from [P
 | Agent gates | `domains/03-agent-gates/` | AG-* |
 | Cursor cloud | `domains/04-cursor/` | CU-* |
 | Secrets | `domains/05-secrets/` | SE-* |
+| Funds/custody | `domains/06-funds-custody/` | FC-* |
 
 ## Validate
 

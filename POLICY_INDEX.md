@@ -33,3 +33,4 @@ One row per enforced rule. Consumers pin this repo at a release SHA and cite IDs
 | SE-11 | 05-secrets | Live GitHub names missing from registry → policy-drift | `lint_registry.py` (report-only) | domains/05-secrets/tests/test_secrets_registry.py |
 | SE-12 | 05-secrets | Registry name set equals `SECRETS.md` | `lint_registry.py` (report-only) | domains/05-secrets/tests/test_secrets_registry.py |
 | SE-13 | 05-secrets | Every `active` entry has `onepassword_item` | `lint_registry.py` (report-only) | domains/05-secrets/tests/test_secrets_registry.py |
+| FC-01 | 06-funds-custody | Default testnet/fork; mainnet, live keys (DEPLOYER_KEY/OPERATOR_KEY), treasury, or prod deploy path changes need named human (Cris) before merge/apply | Named human gate (Cris); consumers cite FC-01 | domains/06-funds-custody/tests/test_funds_custody_gate.py |

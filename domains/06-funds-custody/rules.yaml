@@ -1,0 +1,15 @@
+# FC-* funds/custody human gate (process/cite; no CI enforcer in this domain yet).
+rules:
+  FC-01:
+    summary: >
+      Default to testnet/fork; changes to mainnet config, live signer keys
+      (DEPLOYER_KEY / OPERATOR_KEY or equivalents), treasury / live contract
+      addresses, or production deploy paths require named human approval (Cris)
+      before merge or apply. Agents must not perform those changes unilaterally.
+    default_environment: testnet/fork
+    named_human: Cris
+    scope:
+      - mainnet config
+      - live signer keys (DEPLOYER_KEY, OPERATOR_KEY, or equivalents)
+      - treasury / live contract addresses
+      - production deploy paths
