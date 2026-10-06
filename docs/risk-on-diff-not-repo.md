@@ -6,7 +6,7 @@
 
 When **Cris assigns a task**, that assignment is the **founder yes** to merge PRs **within that task’s written scope** at the time of assignment, for heads whose diff stays inside that scope. No second Cris yes is required for those merges **only while** every enforced gate at the **current head SHA** is satisfied.
 
-**A new push that widens scope** (new paths, new risk class, or repairs outside the assignment) **requires fresh review** — the assignment does not carry forward (same class as fabricbloc **#1600** F1/F2).
+**A new push that widens scope** (new paths, new risk class, or repairs outside the assignment) **requires a new Cris yes** — the assignment does not carry forward (same class as fabricbloc **#1600** F1/F2).
 
 **Limits:**
 
@@ -14,7 +14,7 @@ When **Cris assigns a task**, that assignment is the **founder yes** to merge PR
 - Does not authorize admin/ruleset bypass.
 - Does not replace enforced checks on the PR at head.
 
-Where pinned **`agent-denied-paths`** requires the **AG-06** **`owner-approved`** label, **Cris applies it himself** via the **GitHub web UI** or his **non-shared** credential (shipped **`allowed_label_apps`: `[]`** after **#79** — no Cursor App / fleet tooling label path). **Operators** (including anyone acting as login **`madgeniusblink`**, fleet bots, cloud agents, or shared owner browser sessions) **must not** apply **`owner-approved`** on Cris’s behalf. Task assignment does **not** authorize an agent or operator to apply the label. The label is **head-bound** (a new push clears it).
+Where pinned **`agent-denied-paths`** requires the **AG-06** **`owner-approved`** label, **Cris applies it himself** via the **GitHub web UI** or his **non-shared** credential (shipped **`allowed_label_apps`: `[]`** after **#79** — no Cursor App / fleet tooling label path). **Operators** (including anyone acting as login **`madgeniusblink`**, fleet bots, cloud agents, or shared owner browser sessions) **must not** apply **`owner-approved`** on Cris’s behalf. Task assignment does **not** authorize an agent or operator to apply the label. The label is **head-bound** (a new push **stales** it; gates ignore the label until Cris reapplies it at the new head).
 
 ### Task assignment never satisfies or replaces
 
@@ -26,14 +26,15 @@ Task assignment is **not** any of the following:
 - Clearing an open **FAIL** fabricbloc-verdict at head
 - A **named human merge** where this policy or **FC-01** requires one
 - The **FC-01** funds/custody gate
-- Any **Cris-only** action: prod infra, IAM, secrets, deletes, irreversible actions, **org ruleset apply**
+- Any **Cris-only** action: prod infra, IAM, secrets, deletes, irreversible actions, **production deployment**, **release/prod** promotion or tagging, **org ruleset apply**
 - Approval of **changed heads** or **out-of-scope repairs** beyond the assignment
 
 ## Human merge depends on the diff
 
 **“Touches”** means the diff **edits** the protected **files or values themselves** (not merely names or cites them):
 
-- Production config (non-dev runtime targets, prod env files, prod feature flags)
+- Production config (non-dev runtime targets, prod env files, prod feature flags, **production deployment** targets)
+- **Release** tags, **`release/**` / `prod/**`** branch content, or promotion of build artifacts to production
 - Mainnet addresses and live network identifiers
 - Key or signer config (`DEPLOYER_KEY`, `OPERATOR_KEY`, keystores, HSM config)
 - IAM (roles, policies, trust relationships, cloud identity bindings)
@@ -72,16 +73,16 @@ Then Sweeper may merge — **no** separate named human merge step **for that dif
 
 **Sweeper carve-out (no hygiene auto-merge):**
 
-- **`BloclabsHQ/fabricbloc-branch-policy`** — **no Sweeper** or other hygiene **auto-merge**. Use the **reviewed delivery path**: **Sentinel PASS** on security-sensitive diffs (per **#13** / **`reviewers.json`**) plus **MadAgentPM PASS** at the **exact head**, with **no** open **FAIL** verdict or **CHANGES_REQUESTED** review, then **MadAgentPM merge** (same pattern as **#77**, **#79**). Diffs that edit surfaces on the **human-merge list** above still follow **`owner-approved`** / human-merge rules that list defines. **Org ruleset apply** stays **Cris-only**. Whether the merge button path uses an **admin bypass** is a **separate open question** (canon-config review-gate follow-up — CODEOWNERS plus Cris-gated required code-owner review); **not decided here**.
+- **`BloclabsHQ/fabricbloc-branch-policy`** — **no Sweeper** or other hygiene **auto-merge**. **No admin or ruleset bypass** — bot merge would use org-admin bypass on **`policy-main-protected`**, which this policy forbids (**DECISIONS #14**). **Until PR #82’s code-owner review gate is live and enforced:** **Cris** **human-merges** policy-repo PRs after **Sentinel PASS** (security-sensitive diffs per **#13** / **`reviewers.json`**, including authority prose and gate-path edits) and **MadAgentPM PASS** at the **exact head**, with **no** open **FAIL** verdict or **CHANGES_REQUESTED** review. **After #82 is enforced:** **MadAgentPM** may merge following the same verdict path (non-bypass merge lane). Diffs on the **human-merge list** still need **`owner-approved`** / human merge as that list defines. **Org ruleset apply** stays **Cris-only**.
 - Any other repo whose PR would change **`rulesets/`**, **`canon.json` / `pins.*`**, **`gate-owners.json`**, **`reviewers.json`**, pinned org **gate workflows**, or **`agent-gates/`** code on the merge target — **no Sweeper** on that PR.
 
 ## Review of record (**DECISIONS #14**)
 
-Bot **APPROVE** is not review of record. Where a ruleset requires a native GitHub review, only the configured **`fabricbloc-reviewer`** App (**337673700**) may satisfy it — **only** at the **exact head SHA**, and **only** when **no** open **FAIL** fabricbloc-verdict and **no** open **CHANGES_REQUESTED** review apply at that head. Nothing here creates a reviewer seat, bypass, secret access, or deploy authority.
+Bot **APPROVE** is not review of record. On **Cris-only** or **human-merge** diffs, **`fabricbloc-reviewer`** **APPROVE never counts** toward merge — use **`owner-approved`**, human merge, or verdict PASS from the routed security reviewers as applicable. Where a ruleset requires a native GitHub review on **routine** agent diffs, only the configured **`fabricbloc-reviewer`** App (**337673700**) may satisfy it — **only** at the **exact head SHA**, and **only** when **no** open **FAIL** fabricbloc-verdict and **no** open **CHANGES_REQUESTED** review apply at that head. Nothing here creates a reviewer seat, bypass, secret access, or deploy authority.
 
 ## Still Cris-only (explicit yes)
 
-Prod infra, IAM, secrets, deletes, irreversible actions, and **org ruleset apply** remain **Cris-only**, not council-delegated.
+Prod infra, IAM, secrets, deletes, irreversible actions, **production deployment**, **release/prod** promotion, and **org ruleset apply** remain **Cris-only**, not council-delegated.
 
 ## Related
 

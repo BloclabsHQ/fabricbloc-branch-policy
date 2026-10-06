@@ -18,6 +18,7 @@ from embedded_gate import (  # noqa: E402
     changed_paths_from_files,
     check_run_from_github_actions,
     classify_agent_path_tier,
+    all_matched_route_reviewers,
     classify_review_routes,
     deterministic_auto_approve_eligible,
     issue_comment_edited,
@@ -217,7 +218,7 @@ class TestReviewerRouting(unittest.TestCase):
         self.assertTrue(sens)
 
     def test_classify_decisions_plus_workflow_routes_warden(self):
-        """policy-workflows (230) beats merge-authority-prose (225) when both match."""
+        """Primary route for automation: policy-workflows (230) beats merge-authority (225)."""
         rev, _, sens, matched = classify_review_routes(
             "BloclabsHQ/fabricbloc-branch-policy",
             {"DECISIONS.md", ".github/workflows/agent-denied-paths.yml"},
@@ -226,6 +227,30 @@ class TestReviewerRouting(unittest.TestCase):
         self.assertTrue(matched)
         self.assertEqual(rev, "warden")
         self.assertTrue(sens)
+
+    def test_verdict_reviewers_decisions_plus_workflow_includes_sentinel(self):
+        paths = {"DECISIONS.md", ".github/workflows/agent-denied-paths.yml"}
+        required = required_verdict_reviewers(
+            paths, CFG, "BloclabsHQ/fabricbloc-branch-policy", "agent/warden/docs/x-y", DENIED)
+        self.assertIn("madagentpm", required)
+        self.assertIn("warden", required)
+        self.assertIn("sentinel", required)
+
+    def test_fabricbloc_readme_plus_iac_still_aether_not_sentinel(self):
+        rev, _, _, matched = classify_review_routes(
+            "BloclabsHQ/fabricbloc",
+            {"README.md", "iac/modules/vpc/main.tf"},
+            CFG,
+        )
+        self.assertTrue(matched)
+        self.assertEqual(rev, "aether")
+        reviewers, _ = all_matched_route_reviewers(
+            "BloclabsHQ/fabricbloc",
+            {"README.md", "iac/modules/vpc/main.tf"},
+            CFG,
+        )
+        self.assertIn("aether", reviewers)
+        self.assertNotIn("sentinel", reviewers)
 
     def test_classify_wallet_sentinel(self):
         rev, cris, _, matched = classify_review_routes(

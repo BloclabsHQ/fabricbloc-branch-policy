@@ -1064,6 +1064,34 @@ def deterministic_auto_approve_eligible(paths, cfg, head, denied_entries):
     return agent_denied_paths_successful(head)
 
 
+def _route_matches_paths(route, short, paths):
+    repos = route.get("repos")
+    if repos and short not in repos:
+        return False
+    globs = route.get("path_globs") or []
+    if not globs:
+        return False
+    for p in paths:
+        if any(path_matches_glob_ci(p, g) for g in globs):
+            return True
+    return False
+
+
+def all_matched_route_reviewers(repo_full, paths, cfg):
+    """Union of reviewer slugs from every route whose globs hit the diff (verdict additive)."""
+    short = repo_full.split("/", 1)[-1] if "/" in repo_full else repo_full
+    default = (cfg.get("default_reviewer") or "madagentpm").lower()
+    reviewers = set()
+    matched = False
+    for route in cfg.get("routes") or []:
+        if not _route_matches_paths(route, short, paths):
+            continue
+        matched = True
+        slug = (route.get("reviewer") or default).lower()
+        reviewers.add(slug)
+    return reviewers, matched
+
+
 def classify_review_routes(repo_full, paths, cfg):
     short = repo_full.split("/", 1)[-1] if "/" in repo_full else repo_full
     default = cfg.get("default_reviewer") or "madagentpm"
@@ -1073,20 +1101,9 @@ def classify_review_routes(repo_full, paths, cfg):
     matched = False
     best_prio = -1
     for route in cfg.get("routes") or []:
-        repos = route.get("repos")
-        if repos and short not in repos:
-            continue
-        globs = route.get("path_globs") or []
-        if not globs:
+        if not _route_matches_paths(route, short, paths):
             continue
         prio = int(route.get("priority") or 0)
-        route_hit = False
-        for p in paths:
-            if any(path_matches_glob_ci(p, g) for g in globs):
-                route_hit = True
-                break
-        if not route_hit:
-            continue
         if prio >= best_prio:
             best_prio = prio
             matched = True
@@ -1166,9 +1183,10 @@ def parse_verdict_markers_from_comments(comments, head, excluded_logins, cfg):
 def required_verdict_reviewers(paths, cfg, repo_full, head_ref, denied_entries):
     default = (cfg.get("default_reviewer") or "madagentpm").lower()
     required = {default}
-    routed, _cris, sensitive, matched = classify_review_routes(repo_full, paths, cfg)
+    routed_reviewers, matched = all_matched_route_reviewers(repo_full, paths, cfg)
     if matched:
-        required.add(routed.lower())
+        required.update(routed_reviewers)
+    _routed, _cris, sensitive, _ = classify_review_routes(repo_full, paths, cfg)
     has_verdict_adr = False
     has_verdict_engine = False
     for p in paths:

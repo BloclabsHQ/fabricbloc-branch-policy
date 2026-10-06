@@ -100,7 +100,11 @@
     {
       "id": "merge-authority-prose",
       "priority": 225,
-      "_note": "Below policy-workflows (230) so mixed authority-prose + workflow/gate paths route Warden. DECISIONS #18.",
+      "_note": "Branch-policy + context canon only. Verdict reviewers union all matched routes (Sentinel + Warden when mixed). DECISIONS #18.",
+      "repos": [
+        "fabricbloc-branch-policy",
+        "context"
+      ],
       "path_globs": [
         "DECISIONS.md",
         "README.md",
