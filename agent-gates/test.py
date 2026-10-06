@@ -1510,10 +1510,13 @@ class T(unittest.TestCase):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
         gates = next(r for r in canon["organization_rulesets"] if r["name"] == "canon-agent-gates")
         pr_rules = [r for r in gates.get("rules") or [] if r.get("type") == "pull_request"]
-        self.assertEqual(len(pr_rules), 1, pr_rules)
-        params = pr_rules[0]["parameters"]
+        self.assertEqual(pr_rules, [], "live-matching apply body must be workflows-only")
+        held_pr = [r for r in gates.get("_held_rules") or [] if r.get("type") == "pull_request"]
+        self.assertEqual(len(held_pr), 1, held_pr)
+        params = held_pr[0]["parameters"]
         self.assertEqual(params.get("required_approving_review_count"), 1)
         self.assertNotIn("allowed_merge_methods", params)
+        self.assertIn("_held_note", gates)
 
     def test_canon_agent_gates_live_ref_include(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())

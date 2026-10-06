@@ -55,7 +55,21 @@
       },
       "bypass_actors": [],
       "_bypass_note": "Empty on purpose (decision F6-D2). No standing bypass on canon-agent-gates: break-glass is an org owner sets enforcement to Disabled (org audit log); fabricbloc cursor-env drift opens an issue while disabled. The gates pass at once for GOV-0022 human PRs to main, so nobody needs a bypass. An OrganizationAdmin bypass would also exempt Cursor whenever it acts with an admin's user token.",
-      "_pull_request_note": "GOV-0033 D1 amended (PR-D2, Cris 2026-10-04 7:56 PM PT): one GitHub approving review on merge bases in ref_name.include. GitHub org rulesets cannot scope review count to agent head refs only \u2014 see docs/PR-D2-gov-0033-d1-amendment.md. Agent PRs: satisfied by fabricbloc-reviewer App (337673700) after PR-C verdict + agent-review-of-record. Human GOV-0022 PRs: gates skip (F6-D2/D3); any eligible human APPROVE satisfies the org count (not Cris-only). Repo rulesets (main-required-ci, etc.) keep required_approving_review_count: 0 on their pull_request blocks; org + repo rules aggregate on the same base ref.",
+      "_pull_request_note": "PR-D2 (GOV-0033 D1 amendment, Cris 2026-10-04 7:56 PM PT) founder yes is preserved in `_held_rules` — not in `rules` and not live on org ruleset 24445414 as of 2026-10-05 (workflows-only). See `_held_note`, docs/PR-D2-gov-0033-d1-amendment.md, DECISIONS #17.",
+      "_held_note": "PR-D2 `pull_request` required_approving_review_count: 1 is held (stripped before apply). Live 24445414 = required workflows only. A full-body apply that promoted this rule would deadlock owner-only agent PRs (e.g. fabricbloc #1586): AG-06 owner-approved clears agent-denied-paths and agent-review-of-record, but the author cannot self-approve and reviewer-app-auto-approve refuses Cris-only diffs, so no native APPROVE satisfies org count 1. Re-enable `_held_rules` into `rules` only after (a) fabricbloc-reviewer App submits APPROVE when a valid AG-06 owner-approved label is present at head, and (b) Cris confirms.",
+      "_held_rules": [
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 1,
+            "dismiss_stale_reviews_on_push": true,
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": false
+          }
+        }
+      ],
+      "_live_drift": "Live org ruleset 24445414 (MadAgentPM read 2026-10-05): repository_name.include is fabricbloc, context, keyflo-session-issuer only — not fabric-wallet (PR-D/#51 intent). Staged Cris apply updates workflow SHAs to pins.agent_gates_sha only. Canon keeps fabric-wallet in include until a separate org apply onboarded wallet.",
       "rules": [
         {
           "type": "workflows",
@@ -81,16 +95,6 @@
                 "sha": "093f61dbb9a7e7fb260fd992eceb56acf4ca49ee"
               }
             ]
-          }
-        },
-        {
-          "type": "pull_request",
-          "parameters": {
-            "required_approving_review_count": 1,
-            "dismiss_stale_reviews_on_push": true,
-            "require_code_owner_review": false,
-            "require_last_push_approval": false,
-            "required_review_thread_resolution": false
           }
         }
       ],
