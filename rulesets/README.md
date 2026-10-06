@@ -30,8 +30,8 @@ Under **GOV-0033 decision 4**, a ruleset exists only as a file here.
 | `canon-agent-branches` | fabricbloc `agent/**` | No force-push | none |
 | `canon-provider-branches-blocked` (Q12) | fabricbloc `cursor/**` `codex/**` `claude/**` `qwen/**` | Creation blocked | none |
 | `canon-autonomous-branch-creation` (Q16, held) | fabricbloc `agent/autonomous/**` | Only fabricbloc-agent-ops and admins create | Integration 5170152, OrganizationAdmin |
-| `canon-push-protected-paths` (Q14) | fabricbloc push | Rejects pushes touching workflows, actions, CODEOWNERS, `.cursor`, `.claude/hooks`, `.gitmodules`, engine, gate scripts | OrganizationAdmin |
-| `policy-main-protected` | this repo `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR required, only admins may update | OrganizationAdmin (`pull_request`) |
+| `canon-push-protected-paths` (Q14) | fabricbloc push | Rejects pushes touching workflows, actions, CODEOWNERS, `.cursor`, `.claude/hooks`, `.gitmodules`, gate scripts (14 patterns; **engine removed live 2026-10-05** — merge-gated via agent-denied-paths) | OrganizationAdmin |
+| `policy-main-protected` | this repo `~DEFAULT_BRANCH` | No delete or force-push, linear history, PR required (0 approvals, squash); **no restrict-updates** in canon (pending Cris save on live **24445012**) | OrganizationAdmin (`pull_request`) |
 
 The orphan `ledger` branch on fabricbloc (harvest/retention workflows, `agent-run-ledger`, review-lane scripts) already exists; creation-restricted does not block **updates** to it. No `ledger` exclude — if the branch is deleted, disable this ruleset to recreate it, then re-enable (drift flags the disabled interval).
 
@@ -48,6 +48,8 @@ MadAgentPM read-only desktop audit. **Notes only** in `canon.json` (`_live_drift
 | Classic branch protection **79877078** (fabricbloc `main`) | *(none)* | `_live_drift_notes[0]` (desktop read 2026-10-05, MadAgentPM): PR required, 0 approvals, dismiss-stale/codeowners/last-push off, bypass required-PR actors on, status checks on, admins enforced. |
 | Org branch-name guard **21712689** | `canon-branch-name-guard-pinned` (F6-D6, not applied) | Live **DISABLED**, 33 repos, not fabricbloc. |
 | Org `canon-wallet-green-ci` **24489464** | `organization_rulesets` → `canon-wallet-green-ci` | **Matches on fields read** (dev+main, 0 review count). |
+| Repo push `canon-push-protected-paths` **24485995** (fabricbloc) | `repository_rulesets` → `canon-push-protected-paths` | Cris saved **2026-10-05 ~9:54 PM ET** without `agents/runtime/engine/**/*`; canon path list matches (14 patterns). |
+| Repo `policy-main-protected` **24445012** (branch-policy) | `repository_rulesets` → `policy-main-protected` | **Pending Cris save:** uncheck Restrict updates so green PR merges work; canon omits `update` rule (intended state). |
 
 ## Ruleset drift (live GitHub vs this file)
 

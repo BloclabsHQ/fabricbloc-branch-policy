@@ -523,7 +523,9 @@
       "_repository": "fabricbloc",
       "name": "canon-push-protected-paths",
       "_founder_decision": "Q14",
-      "_finding": "F6 layer (b). Rejects pushes to ANY branch that touch workflows, actions, gate scripts, engine, .cursor, .claude/hooks, .gitmodules or CODEOWNERS unless the pusher is an org admin. Stops the Cursor App installation token, fabricbloc-agent-ops and non-admin users. Also closes agent-added workflows that run with repo secrets on push/pull_request, which layer (a) cannot stop.",
+      "_live_ruleset_id": 24485995,
+      "_live_drift": "MadAgentPM desktop read 2026-10-05: live repo push ruleset 24485995. Cris saved 2026-10-05 ~9:54 PM ET with agents/runtime/engine/**/* removed (14 path patterns remain). Engine changes stay gated at merge by agent-denied-paths. Canon path list updated to match live save.",
+      "_finding": "F6 layer (b). Rejects pushes to ANY branch that touch workflows, actions, gate scripts, .cursor, .claude/hooks, .gitmodules or CODEOWNERS unless the pusher is an org admin. Engine runtime is merge-gated via agent-denied-paths (removed from push lock 2026-10-05). Stops the Cursor App installation token, fabricbloc-agent-ops and non-admin users. Also closes agent-added workflows that run with repo secrets on push/pull_request, which layer (a) cannot stop.",
       "_apply_after": "README step 8: stage-1 evidence that Cursor pushes as the Cursor App installation, not with an org admin's user token. If it pushes as an admin, the OrganizationAdmin bypass exempts it and this ruleset does nothing against Cursor.",
       "_docs": "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets#push-rulesets ; https://github.blog/changelog/2024-09-10-push-rules-are-now-generally-available-and-updates-to-custom-properties/",
       "target": "push",
@@ -548,7 +550,6 @@
               ".cursor/**/*",
               ".claude/hooks/**/*",
               ".gitmodules",
-              "agents/runtime/engine/**/*",
               "agents/agents.yaml",
               "scripts/github-check.sh",
               "scripts/branch-name-policy*",
@@ -563,6 +564,8 @@
     {
       "_repository": "fabricbloc-branch-policy",
       "name": "policy-main-protected",
+      "_live_ruleset_id": 24445012,
+      "_live_drift": "MadAgentPM desktop read 2026-10-05: live repo ruleset 24445012. MadAgentPM staged unchecking Restrict updates (update rule), pending Cris Save — live still blocks non-bypass UI merge on main even when checks are green (bypass = Org admin, PR-only). Canon drops update / restrict-updates to reflect intended state after Cris save.",
       "_finding": "F6 root of trust. The policy repo is PUBLIC, and push rulesets exist only for private/internal repos, so main is protected with a branch ruleset. Because the gates are SHA-pinned, even a bad merge here changes nothing until an org owner re-pins canon-agent-gates.",
       "_apply_after": "README step 2 (before the pinned gates land)",
       "target": "branch",
@@ -593,9 +596,6 @@
           "type": "required_linear_history"
         },
         {
-          "type": "update"
-        },
-        {
           "type": "pull_request",
           "parameters": {
             "required_approving_review_count": 0,
@@ -609,7 +609,7 @@
           }
         }
       ],
-      "_rules_note": "'update' with OrganizationAdmin (pull_request mode) as the only bypass: only org admins can change main, and only through a PR. No App or non-admin collaborator can."
+      "_rules_note": "No restrict-updates (update rule): green reviewed PRs merge without org-admin-only update lock. Deletion, linear history, PR required (0 approvals, squash), and non-fast-forward remain. OrganizationAdmin bypass (pull_request mode) for pull_request rule only."
     }
   ],
   "_live_drift_notes": [

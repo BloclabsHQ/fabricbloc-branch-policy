@@ -62,7 +62,7 @@ Remove or narrow these **`restricted_file_paths`** entries on **`canon-push-prot
 - `scripts/canon-entry-budget.py`
 - `scripts/x64-toolchain-inventory.json`
 
-Keep **workflows**, **engine**, **`.cursor`**, **CODEOWNERS**, and **`.gitmodules`** under push restriction. Optional **`canon.json`** sketch:
+Keep **workflows**, **`.cursor`**, **CODEOWNERS**, and **`.gitmodules`** under push restriction. **`agents/runtime/engine/**/*`** was removed from live push ruleset **24485995** (Cris save **2026-10-05 ~9:54 PM ET**); engine remains merge-gated via **`agent-denied-paths`**. Optional **`canon.json`** sketch:
 
 ```json
 {
@@ -82,7 +82,6 @@ Keep **workflows**, **engine**, **`.cursor`**, **CODEOWNERS**, and **`.gitmodule
           ".cursor/**/*",
           ".claude/hooks/**/*",
           ".gitmodules",
-          "agents/runtime/engine/**/*",
           "agents/agents.yaml",
           "scripts/github-check.sh"
         ]
