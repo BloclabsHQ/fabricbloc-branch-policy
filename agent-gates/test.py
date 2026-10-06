@@ -1266,7 +1266,11 @@ class T(unittest.TestCase):
 
     def test_review_file_count_mismatch_fails_before_auto_approve(self):
         setup(files=("docs/guide.md",), changed=99, reviews=[], **AGENT)
-        code, out = run("agent-review-of-record")
+        Fake.routes["/repos/BloclabsHQ/fabricbloc/pulls/7"]["state"] = "open"
+        code, out = run(
+            "agent-review-of-record",
+            extra_env={"ROR_JOB": "mint", "REVIEWER_APP_TOKEN": "test"},
+        )
         self.assertEqual(code, 1, out)
         self.assertIn("file count mismatch", out)
 

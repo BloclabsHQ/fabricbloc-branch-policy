@@ -131,10 +131,12 @@ def assert_empty_live_head_fails_during_poll(text):
 
 
 def assert_no_ror_combined(text):
-    if '"combined"' in text or "'combined'" in text:
-        raise AssertionError("ROR_JOB=combined must not be supported")
     if re.search(r'ror_job not in \("gate", "mint", "combined"\)', text):
         raise AssertionError("combined must be removed from ROR_JOB allowlist")
+    if re.search(r'or "combined"\)', text):
+        raise AssertionError("ROR_JOB=combined must not be supported")
+    if "run_reviewer_automation()" in text.split("if ror_job == \"gate\":", 1)[-1].split("if ror_job == \"mint\":", 1)[0]:
+        raise AssertionError("gate path must not fall back to reviewer automation (combined mode)")
 
 
 def assert_newest_check_run_by_id(text):
