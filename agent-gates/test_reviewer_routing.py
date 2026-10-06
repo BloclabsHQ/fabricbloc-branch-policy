@@ -216,6 +216,17 @@ class TestReviewerRouting(unittest.TestCase):
         self.assertEqual(rev, "sentinel")
         self.assertTrue(sens)
 
+    def test_classify_decisions_plus_workflow_routes_warden(self):
+        """policy-workflows (230) beats merge-authority-prose (225) when both match."""
+        rev, _, sens, matched = classify_review_routes(
+            "BloclabsHQ/fabricbloc-branch-policy",
+            {"DECISIONS.md", ".github/workflows/agent-denied-paths.yml"},
+            CFG,
+        )
+        self.assertTrue(matched)
+        self.assertEqual(rev, "warden")
+        self.assertTrue(sens)
+
     def test_classify_wallet_sentinel(self):
         rev, cris, _, matched = classify_review_routes(
             "BloclabsHQ/fabric-wallet",

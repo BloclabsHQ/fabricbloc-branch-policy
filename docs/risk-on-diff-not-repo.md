@@ -70,10 +70,10 @@ A repository **risk tier alone never requires a human merge**. Plans, runbooks, 
 
 Then Sweeper may merge — **no** separate named human merge step **for that diff class**.
 
-**Sweeper carve-out (never bot-merge):**
+**Sweeper carve-out (no hygiene auto-merge):**
 
-- **`BloclabsHQ/fabricbloc-branch-policy`** — **`main`** is **`policy-main-protected`**; only org-admin merge path applies. Sweeper merge here would be operator automation using that bypass (**DECISIONS #14**). **Cris merges this repo’s `main`.**
-- Any repo where the PR would change **`rulesets/`**, **`canon.json` / `pins.*`**, **`gate-owners.json`**, **`reviewers.json`**, pinned org **gate workflows**, or **`agent-gates/`** code on the merge target.
+- **`BloclabsHQ/fabricbloc-branch-policy`** — **no Sweeper** or other hygiene **auto-merge**. Use the **reviewed delivery path**: **Sentinel PASS** on security-sensitive diffs (per **#13** / **`reviewers.json`**) plus **MadAgentPM PASS** at the **exact head**, with **no** open **FAIL** verdict or **CHANGES_REQUESTED** review, then **MadAgentPM merge** (same pattern as **#77**, **#79**). Diffs that edit surfaces on the **human-merge list** above still follow **`owner-approved`** / human-merge rules that list defines. **Org ruleset apply** stays **Cris-only**. Whether the merge button path uses an **admin bypass** is a **separate open question** (canon-config review-gate follow-up — CODEOWNERS plus Cris-gated required code-owner review); **not decided here**.
+- Any other repo whose PR would change **`rulesets/`**, **`canon.json` / `pins.*`**, **`gate-owners.json`**, **`reviewers.json`**, pinned org **gate workflows**, or **`agent-gates/`** code on the merge target — **no Sweeper** on that PR.
 
 ## Review of record (**DECISIONS #14**)
 
