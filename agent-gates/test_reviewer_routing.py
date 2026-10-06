@@ -195,6 +195,27 @@ class TestReviewerRouting(unittest.TestCase):
         self.assertFalse(cris)
         self.assertFalse(sens)
 
+    def test_classify_branch_policy_decisions_sentinel(self):
+        rev, cris, sens, matched = classify_review_routes(
+            "BloclabsHQ/fabricbloc-branch-policy",
+            {"DECISIONS.md"},
+            CFG,
+        )
+        self.assertTrue(matched)
+        self.assertEqual(rev, "sentinel")
+        self.assertTrue(sens)
+        self.assertFalse(cris)
+
+    def test_classify_branch_policy_risk_on_diff_sentinel(self):
+        rev, _, sens, matched = classify_review_routes(
+            "BloclabsHQ/fabricbloc-branch-policy",
+            {"docs/risk-on-diff-not-repo.md"},
+            CFG,
+        )
+        self.assertTrue(matched)
+        self.assertEqual(rev, "sentinel")
+        self.assertTrue(sens)
+
     def test_classify_wallet_sentinel(self):
         rev, cris, _, matched = classify_review_routes(
             "BloclabsHQ/fabric-wallet",

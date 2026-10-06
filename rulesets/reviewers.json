@@ -98,6 +98,37 @@
       "sensitive": true
     },
     {
+      "id": "branch-policy-merge-authority-prose",
+      "priority": 270,
+      "repos": [
+        "fabricbloc-branch-policy"
+      ],
+      "path_globs": [
+        "DECISIONS.md",
+        "README.md",
+        "docs/**",
+        "POLICY_INDEX.md",
+        "domains/**/CONTRACT.md"
+      ],
+      "reviewer": "sentinel",
+      "sensitive": true,
+      "_note": "Approval / merge / authority prose (DECISIONS #18). Higher priority than policy-workflows for this repo."
+    },
+    {
+      "id": "merge-authority-prose",
+      "priority": 265,
+      "path_globs": [
+        "DECISIONS.md",
+        "docs/GOV-*.md",
+        "docs/risk-on-diff-not-repo.md",
+        "docs/owner-approved*.md",
+        "docs/REVIEWER-IDENTITY.md",
+        "docs/PR-D2*.md"
+      ],
+      "reviewer": "sentinel",
+      "sensitive": true
+    },
+    {
       "id": "iac-infra",
       "priority": 220,
       "path_globs": [

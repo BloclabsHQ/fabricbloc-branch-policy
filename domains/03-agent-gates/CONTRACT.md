@@ -12,4 +12,4 @@ Verify: `python3 agent-gates/test.py`.
 
 Funds/custody human gate → **FC-01** (`domains/06-funds-custody/`).
 
-Merge authority / human merge vs agent lane → **DECISIONS #18**, `docs/risk-on-diff-not-repo.md` (diff-based risk; repo tier alone does not require human merge).
+Merge authority / human merge vs agent lane → **DECISIONS #18**, `docs/risk-on-diff-not-repo.md` (diff-based risk; Sweeper carve-out for this repo; **`reviewers.json`** routes authority prose to Sentinel).
