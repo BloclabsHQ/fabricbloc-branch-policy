@@ -693,27 +693,85 @@ class T(unittest.TestCase):
             push_activity=[push_activity_entry(pushed_at="2026-10-05T09:30:00Z")],
             **AGENT,
         )
-        code, out = run("agent-denied-paths")
-        self.assertEqual(code, 1, out)
-        self.assertIn("allowed_label_apps", out)
+        for wf in ("agent-denied-paths", "agent-review-of-record"):
+            code, out = run(wf)
+            self.assertEqual(code, 1, out)
+            self.assertIn("allowed_label_apps", out)
 
     def test_owner_approval_timeline_uses_created_at_not_api_order(self):
+        """API returns newest human first, older Cursor second — sort must pick human."""
         setup(
             files=(".github/workflows/ci.yml",),
             issue_labels=("owner-approved",),
             issue_events=(
+                owner_approved_labeled(created_at="2026-10-05T12:00:00Z", id=9002),
                 owner_approved_labeled(
                     created_at="2026-10-05T11:00:00Z",
+                    id=9001,
                     performed_via_github_app={"id": 1210556, "slug": "cursor"},
                 ),
-                owner_approved_labeled(created_at="2026-10-05T12:00:00Z"),
             ),
             push_activity=[push_activity_entry(pushed_at="2026-10-05T10:30:00Z")],
             **AGENT,
         )
+        for wf in ("agent-denied-paths", "agent-review-of-record"):
+            code, out = run(wf)
+            self.assertEqual(code, 0, out)
+            self.assertIn("performed_via_github_app=none", out)
+
+    def test_owner_approval_timeline_id_tiebreak_same_created_at(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(
+                owner_approved_labeled(created_at="2026-10-05T12:00:00Z", id=100),
+                owner_approved_labeled(
+                    created_at="2026-10-05T12:00:00Z",
+                    id=200,
+                    performed_via_github_app={"id": 1210556, "slug": "cursor"},
+                ),
+            ),
+            push_activity=[push_activity_entry(pushed_at="2026-10-05T10:30:00Z")],
+            **AGENT,
+        )
+        for wf in ("agent-denied-paths", "agent-review-of-record"):
+            self.assertEqual(run(wf)[0], 1)
+
+    def test_owner_approval_timeline_missing_created_at_fails_closed(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(created_at=""),),
+            push_activity=[push_activity_entry()],
+            **AGENT,
+        )
         code, out = run("agent-denied-paths")
-        self.assertEqual(code, 0, out)
-        self.assertIn("performed_via_github_app=none", out)
+        self.assertEqual(code, 1, out)
+        self.assertIn("missing created_at", out)
+
+    def test_owner_approval_label_actor_type_missing_fails_closed(self):
+        setup(
+            files=(".github/workflows/ci.yml",),
+            issue_labels=("owner-approved",),
+            issue_events=(owner_approved_labeled(
+                actor={"login": "madgeniusblink", "id": 42707764},
+            ),),
+            push_activity=[push_activity_entry()],
+            **AGENT,
+        )
+        code, out = run("agent-denied-paths")
+        self.assertEqual(code, 1, out)
+        self.assertIn("actor type missing", out)
+
+    def test_pins_agent_gates_sha_is_ancestor_of_main(self):
+        import importlib.util
+
+        path = ROOT / "agent-gates" / "validate_canon.py"
+        spec = importlib.util.spec_from_file_location("validate_canon", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())
+        self.assertEqual(mod.agent_gates_pin_ancestor_errors(canon, ROOT), [])
 
     def test_owner_approval_allowed_github_app_passes(self):
         canon = json.loads((ROOT / "rulesets" / "canon.json").read_text())

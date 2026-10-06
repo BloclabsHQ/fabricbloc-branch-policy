@@ -720,10 +720,12 @@ def print_owner_label_event_audit(labeled_event):
     login = (actor.get("login") or "?")
     uid = actor.get("id")
     uid_s = uid if uid is not None else "?"
+    actor_type = (actor.get("type") or "?")
     app_s = format_label_app_audit((labeled_event or {}).get("performed_via_github_app"))
     print(
         f"{MODE}: owner-approved label event audit: "
-        f"actor login={login!r} id={uid_s} performed_via_github_app={app_s}"
+        f"actor login={login!r} id={uid_s} type={actor_type!r} "
+        f"performed_via_github_app={app_s}"
     )
 
 
@@ -733,7 +735,9 @@ def gate_owner_label_actor_ok(actor, labeled_event, owners_cfg):
     if login.lower().endswith("[bot]"):
         return False, f"label actor {login!r} is a bot login"
     actor_type = ((actor or {}).get("type") or "").strip()
-    if actor_type and actor_type.lower() != "user":
+    if not actor_type:
+        return False, "label actor type missing (fail closed)"
+    if actor_type.lower() != "user":
         return False, f"label actor type {actor_type!r} is not User"
     app = labeled_event.get("performed_via_github_app")
     if app:
@@ -766,21 +770,32 @@ def paginate_issue_events(repo, number):
     return out
 
 
-def label_event_created_at(ev):
-    """Sort key for label timeline events (issue API order is not guaranteed)."""
+def label_event_created_at_strict(ev):
+    """Parse label timeline created_at; fail closed on missing or invalid."""
     value = (ev.get("created_at") or "").strip()
     if not value:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        raise ValueError("label timeline event missing created_at")
     s = value
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
     try:
         dt = datetime.fromisoformat(s)
     except ValueError:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        raise ValueError(f"label timeline event invalid created_at: {value!r}")
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def label_event_sort_key(ev):
+    """Sort by created_at, then GitHub event id tie-break (API order not guaranteed)."""
+    dt = label_event_created_at_strict(ev)
+    eid = ev.get("id")
+    try:
+        eid_i = int(eid) if eid is not None else 0
+    except (TypeError, ValueError):
+        eid_i = 0
+    return (dt, eid_i)
 
 
 def owner_approved_label_timeline(events, label_name):
@@ -794,7 +809,9 @@ def owner_approved_label_timeline(events, label_name):
         name = ((ev.get("label") or {}).get("name") or "").strip().lower()
         if name == needle:
             out.append(ev)
-    out.sort(key=label_event_created_at)
+    for ev in out:
+        label_event_created_at_strict(ev)
+    out.sort(key=label_event_sort_key)
     return out
 
 
@@ -811,7 +828,10 @@ def owner_approval_valid_for_head(repo, number, head, head_ref, owners_cfg):
     if label.lower() not in present:
         return False, f"label {label!r} not present on PR"
     events = paginate_issue_events(repo, number)
-    timeline = owner_approved_label_timeline(events, label)
+    try:
+        timeline = owner_approved_label_timeline(events, label)
+    except ValueError as exc:
+        return False, str(exc)
     if not timeline:
         return False, f"no labeled/unlabeled timeline for {label!r}"
     newest = timeline[-1]

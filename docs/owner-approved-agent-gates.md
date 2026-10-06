@@ -56,7 +56,9 @@ It does **not** block an agent driving a **browser** already signed in as **madg
 
 ## Re-pin after merge (GATE: Cris)
 
-**JSON config (`gate-owners.json`, `reviewers.json`):** merge to policy **`main`** that sets **`pins.agent_gates_sha`** to the commit containing **`allowed_label_apps: []`** (e.g. **#79** **`ee4e57d`**) makes **`[]`** live for fleet gates **immediately** — **no org apply**.
+**Live warning (until pin bump):** Org **`canon-agent-gates`** (**24445414**) loads **`gate-owners.json`** from policy pin **`093f61db`**, which still has **`allowed_label_apps: [1210556]`** — Cursor App labels satisfy AG-06 on fleet repos until **`pins.agent_gates_sha`** on policy **`main`** moves to **#79** **`ee4e57d`** (or later commit with **`[]`**).
+
+**JSON config (`gate-owners.json`, `reviewers.json`):** set **`pins.agent_gates_sha`** on policy **`main`** to the commit containing **`allowed_label_apps: []`** (e.g. **#79** **`ee4e57d`**) — **`[]`** is live for fleet gates **immediately** — **no org apply**. Merging JSON without moving the pin changes nothing live.
 
 **Embedded gate script** (audit log format, timeline sort, etc.): update **`canon-agent-gates`** `workflows[].sha` in **`rulesets/canon.json`** to the merge SHA and **org apply** ruleset **24445414** — **Cris GATE** — so required workflows run the new embedded Python.
 
