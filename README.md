@@ -54,6 +54,10 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 
 **Residual risk:** Deliberate human merge of agent work outside the detection above (for example rewriting history without linked PR metadata) remains a human accountability path, mitigated by PR template and org audit.
 
+## Merge authority and risk (diff, not repo)
+
+**DECISIONS #18** / `docs/risk-on-diff-not-repo.md`: **human merge** is required only when the **diff** hits high-risk surfaces (prod config, mainnet, keys, IAM, secrets, deploy workflows, **FC-01** funds/custody, Cris-only denied paths). A repository **risk tier alone never requires a human merge** — do not add repo-tier human gates in plans or checklists. **Cris task assignment** is the founder yes for merges within that task’s scope (**AG-06** **`owner-approved`** still applies where the pinned gate requires it). **Docs/context-only** work merges via the agent lane (**Sweeper** / hygiene auto-merge) after gates are green. Bot **APPROVE** is not review of record (**DECISIONS #14**); **`fabricbloc-reviewer`** covers native review requirements.
+
 **Branch prefix policy (fabricbloc, finding c inventory):**
 
 | Prefix / pattern | Creation | Rationale |
