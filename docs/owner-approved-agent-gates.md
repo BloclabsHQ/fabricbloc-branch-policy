@@ -23,7 +23,7 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
      2. optional bounded **`Link: rel="next"`** follow (cap **5** pages);
      3. if no matching activity entry: owner override **not satisfied** (**no check-suite fallback**).
 
-4. **Scope:** Clears **Cris-only** **`agent-denied-paths`** failures and satisfies **`agent-review-of-record`** without a GitHub **APPROVE**. **DECISIONS #16** **carves out** decision **#14**: **`madgeniusblink`** label approval counts for ROR **including madgeniusblink-authored PRs** (Cris may apply via **cursor-github** / agent tooling). Does **not** override provider-control / projection hard-fails, open **CHANGES_REQUESTED**, or Sentinel security domains.
+4. **Scope:** Clears **Cris-only** **`agent-denied-paths`** failures and satisfies **`agent-review-of-record`** without a GitHub **APPROVE**. **DECISIONS #16** **carves out** decision **#14**: **`madgeniusblink`** label approval counts for ROR **including madgeniusblink-authored PRs** (Cris may apply via **cursor-github** / agent tooling). Does **not** override provider-control / projection hard-fails, open **CHANGES_REQUESTED**, or Sentinel security domains. **PR-D2** org **`required_approving_review_count: 1`** is **held** in canon (**`_held_rules`**, not live) until the App-APPROVE + **`owner-approved`** fix — **AG-06** alone does not satisfy a live org review count if that rule were applied.
 
 5. **Logging:** when **`performed_via_github_app`** is present on an accepted label event, the gate logs the App payload.
 

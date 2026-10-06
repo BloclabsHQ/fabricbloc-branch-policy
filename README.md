@@ -203,7 +203,7 @@ Org ruleset `canon-agent-gates` (org ruleset id **24445414**, **Active**, no byp
 
 The pinned gate treats every `[bot]` login as an agent for approvals, except entries in the **pinned constant** `REVIEWER_APP_BOTS` in `agent-gates/embedded_gate.py` (synced into both gate workflows). Each entry is `(login, numeric_user_id)` from `GET /users/fabricbloc-reviewer%5Bbot%5D` (live bot id **337673700** after PR #44 pin).
 
-**PR-D2 (GOV-0033 D1 amendment):** org **`canon-agent-gates`** also sets GitHub **`required_approving_review_count: 1`** so auto-merge can complete when the App posts APPROVE. Agent workflow enforcement remains **`agent-review-of-record`**; see `docs/PR-D2-gov-0033-d1-amendment.md`.
+**PR-D2 (GOV-0033 D1 amendment):** org **`canon-agent-gates`** **`required_approving_review_count: 1`** is **HELD** in canon **`_held_rules`** (**DECISIONS #17**), not live on **24445414** — intended so auto-merge can complete when the App posts APPROVE once re-enabled. Agent workflow enforcement remains **`agent-review-of-record`**; see `docs/PR-D2-gov-0033-d1-amendment.md`.
 
 An App approval counts only when:
 
