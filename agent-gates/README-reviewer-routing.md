@@ -21,6 +21,16 @@ Canon: `rulesets/reviewers.json` and `rulesets/gate-owners.json` loaded from `fa
 - **`agent-review-of-record`** job (`pull_request`): exact-head APPROVE gate only — no secrets.
 - **`reviewer-app-auto-approve`** job (`pull_request_target`, env **`reviewer`**): mint + App APPROVE (missing env PEM → skip with notice; no repo/org fallback). Env deployment rules: **`main` only** — **must not** match `refs/pull/*` (Q14 alone is not enough while cursor[bot] pushes).
 
+### Mint timing and org-required workflows
+
+Org **required workflows** (canon-agent-gates) run only on **`pull_request`**, **`pull_request_target`**, and **`merge_group`**. They do **not** run on **`issue_comment`**, so a **fabricbloc-verdict** PASS comment alone never starts mint on fabricbloc.
+
+On each **`pull_request_target`** mint run, the gate **polls** (shared **240s** job budget) for **agent-denied-paths** success on head, then submits **fabricbloc-reviewer** APPROVE if verdict/deterministic rules pass and the App has not already APPROVED that head.
+
+If verdicts land **after** mint already finished without approving, mint runs again on the next **`pull_request_target`** event (`synchronize`, `reopened`, `edited`, or **`owner-approved`** label). Otherwise re-run the mint job manually (`gh run rerun --job <id>`).
+
+**Follow-up (Cris-gated):** a verdict posted after mint finished still does **not** start mint on fabricbloc today. The **fabricbloc-verdict** App has **Issues** and **Pull requests** write only (no **Actions** / **Checks**). Re-running **`reviewer-app-auto-approve`** from the verdict poster needs **`actions:write`** (or an equivalent workflow-dispatch path) on that App — not added in this change. Until then, use **`pull_request_target`** re-fire or manual mint job re-run.
+
 ## Routing (priority)
 
 Highest **`priority`** route wins: cris (prod/IAM/secrets) → sentinel (auth/crypto, `src/auth`, fabric-wallet) → warden (policy/workflows) → aether (iac/infra) → default **madagentpm**.

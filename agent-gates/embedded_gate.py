@@ -1180,9 +1180,8 @@ def required_verdict_reviewers(paths, cfg, repo_full, head_ref, denied_entries):
     return required
 
 
-def verdict_approval_satisfied(
-    comments, head, paths, cfg, excluded_logins, denied_entries, head_ref, *,
-    wait_denied_paths=False, pr_number=None,
+def evaluate_verdict_markers_satisfied(
+    comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
 ):
     if not cfg.get("verdict_approval_enabled"):
         return False, "verdict_approval_enabled is false"
@@ -1190,10 +1189,6 @@ def verdict_approval_satisfied(
         return False, "verdict_app user_id unset or zero (fail closed until Cris pins the App id)"
     if any(classify_agent_path_tier(p, denied_entries) == "cris_only" for p in paths):
         return False, "Cris-only path in diff"
-    if not agent_denied_paths_successful(
-        head, wait_denied_paths=wait_denied_paths, pr_number=pr_number
-    ):
-        return False, "newest agent-denied-paths (GitHub Actions app 15368) not success on head"
     required = required_verdict_reviewers(paths, cfg, REPO, head_ref, denied_entries)
     markers = parse_verdict_markers_from_comments(comments, head, excluded_logins, cfg)
     for rev, verdict in markers.items():
@@ -1203,6 +1198,19 @@ def verdict_approval_satisfied(
         if markers.get(rev) != "PASS":
             return False, f"missing PASS verdict for `{rev}` at head"
     return True, None
+
+
+def verdict_approval_satisfied(
+    comments, head, paths, cfg, excluded_logins, denied_entries, head_ref, *,
+    wait_denied_paths=False, pr_number=None,
+):
+    if not agent_denied_paths_successful(
+        head, wait_denied_paths=wait_denied_paths, pr_number=pr_number
+    ):
+        return False, "newest agent-denied-paths (GitHub Actions app 15368) not success on head"
+    return evaluate_verdict_markers_satisfied(
+        comments, head, paths, cfg, excluded_logins, denied_entries, head_ref
+    )
 
 
 def check_run_from_github_actions(run):
@@ -1240,8 +1248,40 @@ def _newest_github_actions_agent_denied_paths_run(head):
     ga_runs = _github_actions_agent_denied_paths_runs(head)
     if not ga_runs:
         return None
-    ga_runs.sort(key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
+    ga_runs.sort(
+        key=lambda r: (
+            r.get("started_at") or "1970-01-01T00:00:00Z",
+            r.get("id") or 0,
+        )
+    )
     return ga_runs[-1]
+
+
+_ROR_MINT_WAIT_DEADLINE = None
+
+
+def _reset_ror_mint_wait_deadline():
+    global _ROR_MINT_WAIT_DEADLINE
+    _ROR_MINT_WAIT_DEADLINE = None
+
+
+def _ror_mint_wait_budget_sec():
+    raw = os.environ.get("ROR_MINT_WAIT_BUDGET_SEC", "240").strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        fail(f"ROR_MINT_WAIT_BUDGET_SEC must be a number, got {raw!r}")
+
+
+def _ror_mint_wait_deadline():
+    global _ROR_MINT_WAIT_DEADLINE
+    if _ROR_MINT_WAIT_DEADLINE is None:
+        _ROR_MINT_WAIT_DEADLINE = time.monotonic() + _ror_mint_wait_budget_sec()
+    return _ROR_MINT_WAIT_DEADLINE
+
+
+def _ror_mint_wait_remaining_sec():
+    return max(0.0, _ror_mint_wait_deadline() - time.monotonic())
 
 
 def _denied_paths_poll_interval_sec():
@@ -1252,23 +1292,20 @@ def _denied_paths_poll_interval_sec():
         fail(f"DENIED_PATHS_POLL_INTERVAL_SEC must be a number, got {raw!r}")
 
 
-def _denied_paths_poll_timeout_sec():
-    raw = os.environ.get("DENIED_PATHS_POLL_TIMEOUT_SEC", "300").strip()
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        fail(f"DENIED_PATHS_POLL_TIMEOUT_SEC must be a number, got {raw!r}")
-
-
 def agent_denied_paths_successful(head, *, wait_denied_paths=False, pr_number=None):
     """True only when the newest GitHub Actions agent-denied-paths run on head completed success."""
-    deadline = time.monotonic() + _denied_paths_poll_timeout_sec() if wait_denied_paths else None
     interval = _denied_paths_poll_interval_sec() if wait_denied_paths else 0.0
     while True:
+        if wait_denied_paths and _ror_mint_wait_remaining_sec() <= 0:
+            fail(
+                f"mint wait budget exhausted waiting for agent-denied-paths success on head {head[:12]}"
+            )
         if wait_denied_paths and pr_number:
             pr = call(f"/repos/{REPO}/pulls/{pr_number}")
             live_head = (pr.get("head") or {}).get("sha") or ""
-            if live_head and live_head != head:
+            if not live_head.strip():
+                fail("live PR head SHA empty during mint wait; failing closed")
+            if live_head != head:
                 return False
         newest = _newest_github_actions_agent_denied_paths_run(head)
         if newest is None:
@@ -1282,10 +1319,13 @@ def agent_denied_paths_successful(head, *, wait_denied_paths=False, pr_number=No
                 return False
         if not wait_denied_paths:
             return False
-        if deadline is not None and time.monotonic() >= deadline:
-            return False
+        remaining = _ror_mint_wait_remaining_sec()
+        if remaining <= 0:
+            fail(
+                f"mint wait budget exhausted waiting for agent-denied-paths success on head {head[:12]}"
+            )
         if interval > 0:
-            time.sleep(interval)
+            time.sleep(min(interval, remaining))
 
 
 def post_issue_comment(number, body, token=None):
@@ -1295,6 +1335,26 @@ def post_issue_comment(number, body, token=None):
         body={"body": body},
         token=token,
     )
+
+
+def reviewer_app_already_approved_at_head(number, head, reviewer_bots=None):
+    reviewer_bots = reviewer_bots if reviewer_bots is not None else REVIEWER_APP_BOTS
+    reviews = paginate(f"/repos/{REPO}/pulls/{number}/reviews", 10000)
+    for r in reviews:
+        if r.get("state") != "APPROVED":
+            continue
+        if (r.get("commit_id") or "") != head:
+            continue
+        user = r.get("user") or {}
+        login = user.get("login") or ""
+        try:
+            uid = int(user.get("id") or 0)
+        except (TypeError, ValueError):
+            uid = 0
+        for bot_login, bot_id in reviewer_bots:
+            if login == bot_login and uid == bot_id:
+                return True
+    return False
 
 
 def submit_reviewer_app_approve(number, head, app_token, reviewer_slug):
@@ -1309,6 +1369,40 @@ def submit_reviewer_app_approve(number, head, app_token, reviewer_slug):
         body={"commit_id": head, "body": body, "event": "APPROVE"},
         token=app_token,
     )
+
+
+def mint_live_head_or_fail(number, expected_head):
+    pr = call(f"/repos/{REPO}/pulls/{number}")
+    live_head = (pr.get("head") or {}).get("sha") or ""
+    if not live_head.strip():
+        fail("live PR head SHA empty; failing closed before App APPROVE")
+    if live_head != expected_head:
+        fail(
+            f"head changed before App APPROVE ({expected_head[:12]} -> {live_head[:12]}); "
+            "failing closed"
+        )
+    return live_head
+
+
+def enforce_mint_pr_eligible(pr):
+    state = (pr.get("state") or "").strip().lower()
+    if state != "open":
+        fail(f"mint blocked: pull request state {state!r} (must be open)")
+    base_ref = (pr.get("base") or {}).get("ref") or ""
+    if base_ref != "main":
+        fail(f"mint blocked: pull request base ref {base_ref!r} (must be main)")
+
+
+def submit_reviewer_app_approve_if_needed(
+    number, head, app_token, reviewer_slug, *, guard_head=False,
+):
+    if guard_head:
+        mint_live_head_or_fail(number, head)
+    if reviewer_app_already_approved_at_head(number, head):
+        print(f"{MODE}: already approved at head {head[:12]} (fabricbloc-reviewer App)")
+        return False
+    submit_reviewer_app_approve(number, head, app_token, reviewer_slug)
+    return True
 
 
 def try_reviewer_automation(
@@ -1326,37 +1420,65 @@ def try_reviewer_automation(
         )
         fail("cris_required path class; App auto-approve blocked")
     app_token = os.environ.get("REVIEWER_APP_TOKEN", "").strip()
-    deterministic = deterministic_auto_approve_eligible(
-        paths, cfg, head, denied_entries,
-        wait_denied_paths=wait_denied_paths, pr_number=number,
-    )
+    guard_head = wait_denied_paths
+    if wait_denied_paths:
+        denied_ok = agent_denied_paths_successful(
+            head, wait_denied_paths=True, pr_number=number
+        )
+        deterministic = (
+            denied_ok
+            and all_paths_eligible_for_auto(paths, cfg, REPO, denied_entries)
+        )
+    else:
+        denied_ok = None
+        deterministic = deterministic_auto_approve_eligible(
+            paths, cfg, head, denied_entries,
+            wait_denied_paths=False, pr_number=number,
+        )
     if deterministic and app_token:
-        submit_reviewer_app_approve(number, head, app_token, reviewer)
-        print(f"{MODE}: App APPROVE (deterministic: gates green, default route `{reviewer}`)")
+        if submit_reviewer_app_approve_if_needed(
+            number, head, app_token, reviewer, guard_head=guard_head
+        ):
+            print(f"{MODE}: App APPROVE (deterministic: gates green, default route `{reviewer}`)")
+            return True
         return True
     if deterministic and not app_token:
         print(
             f"{MODE}: deterministic auto-approve eligible but REVIEWER_APP_TOKEN unset; "
             "skipping App approval (configure REVIEWER_APP_PRIVATE_KEY when ready)"
         )
-    comments = paginate(f"/repos/{REPO}/issues/{number}/comments", MAX_ISSUE_COMMENTS)
-    ok, reason = verdict_approval_satisfied(
-        comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
-        wait_denied_paths=wait_denied_paths, pr_number=number,
-    )
+    if wait_denied_paths and not denied_ok:
+        reason = "newest agent-denied-paths (GitHub Actions app 15368) not success on head"
+        ok = False
+    else:
+        comments = paginate(f"/repos/{REPO}/issues/{number}/comments", MAX_ISSUE_COMMENTS)
+        if wait_denied_paths:
+            ok, reason = evaluate_verdict_markers_satisfied(
+                comments, head, paths, cfg, excluded_logins, denied_entries, head_ref
+            )
+        else:
+            ok, reason = verdict_approval_satisfied(
+                comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
+                wait_denied_paths=False, pr_number=number,
+            )
     if ok and app_token:
         required = required_verdict_reviewers(paths, cfg, REPO, head_ref, denied_entries)
-        submit_reviewer_app_approve(number, head, app_token, reviewer)
-        print(
-            f"{MODE}: App APPROVE from fabricbloc-verdict PASS markers "
-            f"(required reviewers: {sorted(required)})"
-        )
+        if submit_reviewer_app_approve_if_needed(
+            number, head, app_token, reviewer, guard_head=guard_head
+        ):
+            print(
+                f"{MODE}: App APPROVE from fabricbloc-verdict PASS markers "
+                f"(required reviewers: {sorted(required)})"
+            )
         return True
     if ok and not app_token:
         print(
             f"{MODE}: verdict path satisfied but REVIEWER_APP_TOKEN unset; "
             "skipping App approval (configure REVIEWER_APP_PRIVATE_KEY when ready)"
         )
+    if wait_denied_paths:
+        print(f"{MODE}: mint did not submit App APPROVE ({reason or 'waiting'})")
+        return False
     marker_hint = (
         f"<!-- fabricbloc-verdict v1 reviewer=<madagentpm|sentinel|aether|warden> "
         f"verdict=PASS head={head} -->"
@@ -1393,10 +1515,7 @@ def main():
     reviewer_bots = REVIEWER_APP_BOTS
     number = os.environ.get("PR", "")
     if not number.isdigit():
-        fail(
-            "no pull request number in the event "
-            "(pull_request, pull_request_target, or issue_comment on a PR)"
-        )
+        fail("no pull request number in the event (only pull_request events are supported)")
     default_branch = os.environ.get("REPO_DEFAULT_BRANCH", "").strip()
     if not default_branch:
         fail("REPO_DEFAULT_BRANCH is empty; workflow must set github.event.repository.default_branch")
@@ -1575,6 +1694,8 @@ def main():
         )
 
     if ror_job == "mint":
+        enforce_mint_pr_eligible(pr)
+        _reset_ror_mint_wait_deadline()
         if run_reviewer_automation(wait_denied_paths=True):
             print(f"{MODE}: mint job submitted App APPROVE at {head[:12]}")
         else:

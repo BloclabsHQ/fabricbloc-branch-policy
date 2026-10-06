@@ -1349,6 +1349,8 @@ class T(unittest.TestCase):
         self.assertEqual(mint_job.get("environment"), "reviewer")
         mint_perms = mint_job.get("permissions") or {}
         self.assertEqual(mint_perms.get("issues"), "write")
+        self.assertEqual(mint_perms.get("pull-requests"), "read")
+        self.assertNotEqual(mint_perms.get("pull-requests"), "write")
 
     def test_review_of_record_split_pull_request_and_target(self):
         doc = yaml.safe_load((WF / "agent-review-of-record.yml").read_text())
@@ -1367,10 +1369,17 @@ class T(unittest.TestCase):
         mint_if = mint.get("if") or ""
         self.assertIn("pull_request_target", mint_if)
         self.assertIn("owner-approved", mint_if)
-        self.assertIn("issue_comment", mint_if)
-        self.assertIn(VERDICT_BOT, mint_if)
-        issue_types = (on.get("issue_comment") or {}).get("types") or []
-        self.assertIn("created", issue_types)
+        self.assertNotIn("issue_comment", mint_if)
+        self.assertNotIn("issue_comment", on)
+        for required in (
+            "github.event_name == 'pull_request_target'",
+            "github.base_ref == 'main'",
+            "owner-approved",
+        ):
+            self.assertIn(required, mint_if, f"mint job if: must retain {required!r}")
+        conc = mint.get("concurrency") or {}
+        self.assertFalse(conc.get("cancel-in-progress"))
+        self.assertIn("ror-mint-", str(conc.get("group") or ""))
         self.assertGreaterEqual(int(mint.get("timeout-minutes") or 0), 10)
         gate_step = gate["steps"][0]
         gate_env = gate_step.get("env") or {}
@@ -2032,13 +2041,13 @@ class T(unittest.TestCase):
 class TestMintDeniedPathsPoll(unittest.TestCase):
     """Mint path waits for agent-denied-paths (GitHub Actions app 15368) before App APPROVE."""
 
-    def _poll_env(self):
+    def _poll_env(self, *, budget="1"):
         return {
             "DENIED_PATHS_POLL_INTERVAL_SEC": "0",
-            "DENIED_PATHS_POLL_TIMEOUT_SEC": "1",
+            "ROR_MINT_WAIT_BUDGET_SEC": budget,
         }
 
-    def _run_denied_paths_check(self, eg, *, head=HEAD, pr_number="7", wait=True, check_runs_state):
+    def _run_denied_paths_check(self, eg, *, head=HEAD, pr_number="7", wait=True, check_runs_state, budget="1"):
         """check_runs_state: list of check_runs payloads returned on successive API reads."""
         state = {"i": 0, "heads": {str(pr_number): head}}
 
@@ -2077,8 +2086,9 @@ class TestMintDeniedPathsPoll(unittest.TestCase):
         eg.TOKEN = "test"
         eg.urllib.request.urlopen = fake_urlopen
         eg.time.sleep = lambda _s: None
+        eg._reset_ror_mint_wait_deadline()
         env = dict(os.environ)
-        env.update(self._poll_env())
+        env.update(self._poll_env(budget=budget))
         for k, v in env.items():
             os.environ[k] = v
         try:
@@ -2089,6 +2099,7 @@ class TestMintDeniedPathsPoll(unittest.TestCase):
             eg.urllib.request.urlopen = orig_open
             eg.time.sleep = orig_sleep
             eg.REPO, eg.TOKEN = orig_repo, orig_token
+            eg._reset_ror_mint_wait_deadline()
 
     def _ga_run(self, *, status="completed", conclusion="success", run_id=1):
         return {
@@ -2127,11 +2138,12 @@ class TestMintDeniedPathsPoll(unittest.TestCase):
     def test_never_completes_before_timeout_fails_closed(self):
         import embedded_gate as eg
 
-        ok = self._run_denied_paths_check(
-            eg,
-            check_runs_state=[[self._ga_run(status="in_progress", conclusion=None)]] * 20,
-        )
-        self.assertFalse(ok)
+        with self.assertRaises(SystemExit):
+            self._run_denied_paths_check(
+                eg,
+                budget="0",
+                check_runs_state=[[self._ga_run(status="in_progress", conclusion=None)]] * 20,
+            )
 
     def test_head_changes_mid_poll_fails_closed(self):
         import embedded_gate as eg
@@ -2171,6 +2183,7 @@ class TestMintDeniedPathsPoll(unittest.TestCase):
         eg.urllib.request.urlopen = fake_urlopen
         eg.time.sleep = lambda _s: None
         os.environ.update(self._poll_env())
+        eg._reset_ror_mint_wait_deadline()
         try:
             ok = eg.agent_denied_paths_successful(
                 HEAD, wait_denied_paths=True, pr_number="7"
@@ -2178,7 +2191,74 @@ class TestMintDeniedPathsPoll(unittest.TestCase):
         finally:
             eg.urllib.request.urlopen = orig_open
             eg.time.sleep = orig_sleep
+            eg._reset_ror_mint_wait_deadline()
         self.assertFalse(ok)
+
+    def test_two_sequential_waits_share_budget(self):
+        import embedded_gate as eg
+
+        clock = [1000.0]
+        reads = [0]
+
+        def fake_monotonic():
+            return clock[0]
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+
+        class FakeResp:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def read(self):
+                return json.dumps(self._payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        def fake_urlopen(req, timeout=30):
+            path = urllib.parse.urlparse(
+                req.full_url if hasattr(req, "full_url") else req.get_full_url()
+            ).path
+            if path.endswith("/pulls/7"):
+                return FakeResp({"head": {"sha": HEAD}})
+            if f"/commits/{HEAD}/check-runs" in path:
+                reads[0] += 1
+                if reads[0] <= 2:
+                    runs = [self._ga_run(status="in_progress", conclusion=None)]
+                elif reads[0] == 3:
+                    runs = [self._ga_run(status="completed", conclusion="success")]
+                else:
+                    runs = [self._ga_run(status="in_progress", conclusion=None)]
+                return FakeResp({"check_runs": runs})
+            raise AssertionError(path)
+
+        orig_open = eg.urllib.request.urlopen
+        orig_sleep = eg.time.sleep
+        orig_mono = eg.time.monotonic
+        eg.urllib.request.urlopen = fake_urlopen
+        eg.time.sleep = fake_sleep
+        eg.time.monotonic = fake_monotonic
+        eg._reset_ror_mint_wait_deadline()
+        os.environ["ROR_MINT_WAIT_BUDGET_SEC"] = "0.25"
+        os.environ["DENIED_PATHS_POLL_INTERVAL_SEC"] = "0.1"
+        try:
+            self.assertTrue(
+                eg.agent_denied_paths_successful(HEAD, wait_denied_paths=True, pr_number="7")
+            )
+            spent = clock[0] - 1000.0
+            self.assertGreater(spent, 0.15)
+            with self.assertRaises(SystemExit):
+                eg.agent_denied_paths_successful(HEAD, wait_denied_paths=True, pr_number="7")
+            self.assertLess(clock[0] - 1000.0, 0.26)
+        finally:
+            eg.urllib.request.urlopen = orig_open
+            eg.time.sleep = orig_sleep
+            eg.time.monotonic = orig_mono
+            eg._reset_ror_mint_wait_deadline()
 
     def test_mint_job_env_sets_poll_defaults(self):
         doc = yaml.safe_load((WF / "agent-review-of-record.yml").read_text())
@@ -2186,7 +2266,118 @@ class TestMintDeniedPathsPoll(unittest.TestCase):
         mint_run = [s for s in mint["steps"] if s.get("env", {}).get("ROR_JOB") == "mint"][0]
         env = mint_run.get("env") or {}
         self.assertEqual(env.get("DENIED_PATHS_POLL_INTERVAL_SEC"), "10")
-        self.assertEqual(env.get("DENIED_PATHS_POLL_TIMEOUT_SEC"), "300")
+        self.assertEqual(env.get("ROR_MINT_WAIT_BUDGET_SEC"), "240")
+        self.assertNotIn("DENIED_PATHS_POLL_TIMEOUT_SEC", env)
+
+    def test_reviewer_app_dedupe_skips_second_approve(self):
+        import embedded_gate as eg
+
+        posted = []
+
+        def fake_call(path, method="GET", body=None, token=None):
+            if method == "POST" and path.endswith("/reviews"):
+                posted.append(body)
+            return {}
+
+        orig = eg.call
+        eg.call = fake_call
+        eg.REPO = "BloclabsHQ/fabricbloc"
+        reviews = [
+            approve(REVIEWER_BOT, sha=HEAD, body=reviewer_body(), user_id=REVIEWER_BOT_ID),
+        ]
+        orig_page = eg.paginate
+        eg.paginate = lambda path, *a, **k: reviews if path.endswith("/reviews") else []
+        try:
+            self.assertTrue(
+                eg.reviewer_app_already_approved_at_head("7", HEAD)
+            )
+            self.assertFalse(
+                eg.submit_reviewer_app_approve_if_needed("7", HEAD, "tok", "madagentpm")
+            )
+        finally:
+            eg.call = orig
+            eg.paginate = orig_page
+        self.assertEqual(posted, [])
+
+    def test_mint_workflow_yaml_guardrails(self):
+        text = (WF / "agent-review-of-record.yml").read_text()
+        doc = yaml.safe_load(text)
+        on = doc.get("on") or doc.get(True) or {}
+        self.assertNotIn("issue_comment", on)
+        mint = (doc.get("jobs") or {}).get("reviewer-app-auto-approve") or {}
+        mint_if = mint.get("if") or ""
+        self.assertNotIn("issue_comment", mint_if)
+        self.assertIn("pull_request_target", mint_if)
+        self.assertIn("github.base_ref == 'main'", mint_if)
+        perms = mint.get("permissions") or {}
+        self.assertEqual(perms.get("pull-requests"), "read")
+        self.assertNotIn("write", str(perms.get("pull-requests") or ""))
+
+    def test_fail_verdict_fetched_after_poll_blocks_approve(self):
+        import embedded_gate as eg
+
+        poll_done = [False]
+        posted = []
+
+        def fake_denied(head, *, wait_denied_paths=False, pr_number=None):
+            poll_done[0] = True
+            return True
+
+        def fake_page(path, *a, **k):
+            self.assertTrue(poll_done[0], "verdict comments must be fetched only after denied-paths poll")
+            if "/comments" in path:
+                return [{
+                    "body": (
+                        f"<!-- fabricbloc-verdict v1 reviewer=madagentpm "
+                        f"verdict=FAIL head={HEAD} -->"
+                    ),
+                    "user": {"login": VERDICT_BOT, "id": VERDICT_BOT_ID},
+                }]
+            return []
+
+        def fake_call(path, method="GET", body=None, token=None):
+            if method == "POST" and path.endswith("/reviews"):
+                posted.append(body)
+            if path.endswith("/pulls/7"):
+                return {"head": {"sha": HEAD}, "base": {"ref": "main"}, "state": "open"}
+            return {}
+
+        orig = (
+            eg.agent_denied_paths_successful,
+            eg.paginate,
+            eg.call,
+            eg.all_paths_eligible_for_auto,
+        )
+        eg.agent_denied_paths_successful = fake_denied
+        eg.paginate = fake_page
+        eg.call = fake_call
+        eg.all_paths_eligible_for_auto = lambda *a, **k: False
+        cfg = {"verdict_approval_enabled": True, "verdict_app": {"login": VERDICT_BOT, "user_id": VERDICT_BOT_ID}}
+        try:
+            ok = eg.try_reviewer_automation(
+                "7", HEAD, ("docs/x.md",), cfg, set(), list(eg.FLOOR_DENIED), "agent/warden/feat/x-y",
+                wait_denied_paths=True,
+            )
+        finally:
+            (
+                eg.agent_denied_paths_successful,
+                eg.paginate,
+                eg.call,
+                eg.all_paths_eligible_for_auto,
+            ) = orig
+        self.assertFalse(ok)
+        self.assertEqual(posted, [])
+
+    def test_mint_enforces_open_pr_and_main_base(self):
+        import embedded_gate as eg
+
+        for pr, msg in (
+            ({"state": "closed", "base": {"ref": "main"}}, "must be open"),
+            ({"state": "open", "base": {"ref": "dev"}}, "must be main"),
+        ):
+            with self.subTest(msg):
+                with self.assertRaises(SystemExit):
+                    eg.enforce_mint_pr_eligible(pr)
 
 
 if __name__ == "__main__":

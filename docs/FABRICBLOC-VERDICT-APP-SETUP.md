@@ -12,7 +12,9 @@ Do this while Warden builds the branch-policy PR. Nothing goes live until the PR
    - Repository → Pull requests: **Read & write** (required to create comments on pull requests; GitHub returns **403** if the App only has Issues write + Pull requests read)
    - Repository → Metadata: **Read-only**
    - Everything else: **No access**
-   - Especially: Contents = No access, Checks = No access, Administration = No access
+   - Especially: Contents = No access, **Actions = No access**, Checks = No access, Administration = No access
+
+   **Mint re-run after verdict:** org required workflows do not run on `issue_comment`. To re-run **`reviewer-app-auto-approve`** from the verdict App after posting a marker would require **Actions: Read and write** (workflow/job re-run API) in addition to today's permissions — a **Cris-gated** follow-up, not live in the pinned gate.
 
    **Pull request write is for PR comments only** (same marker body as today). The gate never treats an **APPROVE** review from **fabricbloc-verdict[bot]** as satisfying review-of-record; only unedited `<!-- fabricbloc-verdict v1 … -->` issue comments count. GitHub **APPROVE** at head stays with **fabricbloc-reviewer[bot]**.
 6. Where can this App be installed? Only on this account (BloclabsHQ).
