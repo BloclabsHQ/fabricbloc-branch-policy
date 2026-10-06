@@ -83,7 +83,9 @@ def embedded(name):
 
 
 MANIFEST = {"operators": {"members_expected": ["Madgeniusblink"]},
-            "denied_paths": {"arch_0048_baseline": [".github/workflows/", "decisions/"],
+            "denied_paths": {"arch_0048_baseline": [
+                ".github/workflows/", "decisions/", "architecture/decisions/",
+            ],
                              "proposed_additions": ["ops/"]}}
 
 

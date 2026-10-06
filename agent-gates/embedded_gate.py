@@ -891,8 +891,10 @@ def path_is_gov_decision(path):
     rest = norm[len(ARCH_DECISIONS_PREFIX):]
     if not rest:
         return False
-    first = rest.split("/")[0]
-    return first.startswith("gov-")
+    for segment in rest.split("/"):
+        if segment.lower().startswith("gov-"):
+            return True
+    return False
 
 
 def path_is_engine_verdict_eligible(path):
@@ -932,13 +934,13 @@ def classify_agent_path_tier(path, denied_entries):
         return "cris_only"
     if path_has_canon_json_basename(path) or path_has_approval_relay_segment(path):
         return "cris_only"
-    if path_matches_denied(path, denied_entries):
-        return "cris_only"
     norm = normalize_repo_path(path)
     if norm.startswith(ARCH_DECISIONS_PREFIX):
         if path_is_gov_decision(path):
             return "cris_only"
         return "verdict_eligible"
+    if path_matches_denied(path, denied_entries):
+        return "cris_only"
     if path_under_engine(path):
         if path_is_engine_cris_only(path):
             return "cris_only"
