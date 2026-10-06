@@ -11,6 +11,7 @@ validate:
 	python3 agent-gates/sync_embedded_gate.py
 	test -z "$$(git diff --name-only .github/workflows/agent-denied-paths.yml .github/workflows/agent-review-of-record.yml 2>/dev/null)" || git diff --exit-code .github/workflows/agent-denied-paths.yml .github/workflows/agent-review-of-record.yml
 	python3 agent-gates/test.py
+	python3 agent-gates/test_mint_guard_mutations.py
 	python3 agent-gates/test_reviewer_routing.py
 	python3 agent-gates/test_issue_link.py
 	python3 hygiene/sync_embedded_hygiene.py

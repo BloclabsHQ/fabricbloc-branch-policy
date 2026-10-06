@@ -13,7 +13,7 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
 
 2. **Cris** (or another configured owner) applies **`owner-approved`** on the PR after reviewing the **current head**.
 
-3. Both pinned gates re-run on **`labeled`** / **`unlabeled`** (and existing PR events). **`reviewer-app-auto-approve`** (`pull_request_target`) runs on label events **only** when the label is **`owner-approved`** (other labels do not mint App reviews or post fb-routing). Gates pass when:
+3. Pinned gates may declare extra workflow `types` (e.g. **`labeled`** / **`edited`**) for repo-local runs, but **org required workflows** (canon-agent-gates) only fire on **`opened`**, **`synchronize`**, and **`reopened`**. **`owner-approved`** clears **`agent-denied-paths`** / gate **`agent-review-of-record`** when those runs happen; it does **not** by itself start a new org-required mint run. **`reviewer-app-auto-approve`** mint still needs **`synchronize`**, **`reopened`**, or manual job re-run after late verdicts. Gates pass when:
    - the label is **present** on the PR;
    - the **newest** timeline event for **`owner_approved_label`** is **`labeled`** (not **`unlabeled`**);
    - the **`labeled`** event **actor** is a **`User`** matching a **`gate_owners`** entry (login + user id; not `*[bot]`);
