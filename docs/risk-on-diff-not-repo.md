@@ -4,13 +4,13 @@
 
 ## Task assignment is the founder yes
 
-When **Cris assigns a task**, that assignment is the **founder yes** to merge PRs **within that task’s scope**. No second Cris yes is required for merge.
+When **Cris assigns a task**, that assignment is the **founder yes** to merge PRs **within that task’s scope** that do **not** hit a **Cris-only enforced check** (for example a diff with no denied-path failure). No second Cris yes is required for those merges.
 
 **Limits:**
 
 - Does not extend beyond the assigned task scope.
 - Does not authorize admin/ruleset bypass.
-- Does not replace enforced checks. Where **`agent-denied-paths`** requires the **AG-06** **`owner-approved`** label, the label is still required. Per **DECISIONS #16**, an operator may apply **`owner-approved`** to record Cris’s assignment; it is **head-bound** (a new push clears it).
+- Does not replace enforced checks. Where pinned **`agent-denied-paths`** requires the **AG-06** **`owner-approved`** label, the label is still required and **Cris applies it himself** in the **GitHub UI** (human PAT / web). **Operators must not** apply **`owner-approved`** on Cris’s behalf (**Sentinel HIGH** — Cursor App / agent tooling must not stand in for that yes; companion change sets **`allowed_label_apps`** to **`[]`**). Task assignment does **not** authorize an agent or operator to apply the label. The label remains **head-bound** (a new push clears it).
 
 ## Human merge depends on the diff
 
@@ -25,13 +25,13 @@ Docs or context that **only names or points to** a boundary does **not** trigger
 
 A repository **risk tier alone never requires a human merge**. Plans, runbooks, and checklists must **not** add a repo-tier human gate.
 
-**Separate from this prose:** pinned **`agent-denied-paths`** still enforces by **file path**, not by whether the edit changes a secret value. A docs or context file on a **Cris-only path** (for example a comment-only edit to **`rulesets/canon.json`**) still needs **AG-06** **`owner-approved`** (or a human branch) even when the content is purely documentary.
+**Separate from this prose:** pinned **`agent-denied-paths`** still enforces by **file path**, not by whether the edit changes a secret value. A docs or context file on a **Cris-only path** (for example a comment-only edit to **`rulesets/canon.json`**) still needs **`owner-approved`** from **Cris in the GitHub UI** (or a human branch) even when the content is purely documentary.
 
 ## Agent merge lane (Sweeper)
 
 **Docs/context-only** diffs in **any** repo merge via the agent lane after:
 
-- Owner ACK (task assignment or **AG-06** where required)
+- Owner ACK (task assignment when no Cris-only gate failure; **`owner-approved`** from Cris in GitHub UI when **`agent-denied-paths`** requires it)
 - Shape / policy checks
 - **Sentinel** review where **B1/B2** security lines change
 - Green required checks
