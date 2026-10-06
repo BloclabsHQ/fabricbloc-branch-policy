@@ -240,8 +240,15 @@ class TestReviewerRouting(unittest.TestCase):
         cfg = {**CFG_VERDICT, "verdict_app": {"login": VERDICT_BOT, "user_id": 0}}
         paths = {"architecture/decisions/ARCH-0045.md"}
         comments = [comment(verdict_marker("madagentpm", HEAD), login=VERDICT_BOT, user_id=0)]
-        ok, reason = verdict_approval_satisfied(
-            comments, HEAD, paths, cfg, set(), DENIED, "agent/session/feat/x-y")
+        import embedded_gate as eg
+
+        orig = eg.agent_denied_paths_successful
+        eg.agent_denied_paths_successful = lambda _h, **_: True
+        try:
+            ok, reason = verdict_approval_satisfied(
+                comments, HEAD, paths, cfg, set(), DENIED, "agent/session/feat/x-y")
+        finally:
+            eg.agent_denied_paths_successful = orig
         self.assertFalse(ok)
         self.assertIn("user_id", reason)
 
