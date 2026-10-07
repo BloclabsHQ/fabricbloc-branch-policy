@@ -2421,5 +2421,31 @@ class TestMintDeniedPathsPoll(unittest.TestCase):
                     eg.enforce_mint_pr_eligible(pr)
 
 
+
+class CIReviewOptInGateContract(unittest.TestCase):
+    def test_same_head_label_removal_rejects_prior_app_approval_but_allows_human(self):
+        setup(files=("docs/x.md",),
+              reviews=[approve(REVIEWER_BOT, body=reviewer_body(), user_id=REVIEWER_BOT_ID)], **AGENT)
+        cfg = json.loads((ROOT / "rulesets/reviewers.json").read_text())
+        cfg["ci_review"] = {"enabled": True, "repository": "BloclabsHQ/fabricbloc", "required_opt_in_label": "review:auto"}
+        for key in list(Fake.routes):
+            if key.endswith("rulesets/reviewers.json"):
+                Fake.routes[key] = json.dumps(cfg)
+        pr = Fake.routes["/repos/BloclabsHQ/fabricbloc/pulls/7"]
+        pr.update(state="open", draft=False, labels=[{"name": "review:auto"}])
+        mode = {"ROR_JOB": "gate"}
+        code, out = run("agent-review-of-record", extra_env=mode)
+        self.assertEqual(code, 0, out)
+        pr["labels"] = []
+        code, out = run("agent-review-of-record", extra_env=mode)
+        self.assertEqual(code, 1, out)
+        Fake.routes["/repos/BloclabsHQ/fabricbloc/pulls/7/reviews"].append(approve("Madgeniusblink"))
+        code, out = run("agent-review-of-record", extra_env=mode)
+        self.assertEqual(code, 0, out)
+        Fake.routes["/repos/BloclabsHQ/fabricbloc/pulls/7/reviews"].append(approve("independent-human", state="CHANGES_REQUESTED"))
+        code, out = run("agent-review-of-record", extra_env=mode)
+        self.assertEqual(code, 1, out)
+        self.assertIn("open CHANGES_REQUESTED", out)
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

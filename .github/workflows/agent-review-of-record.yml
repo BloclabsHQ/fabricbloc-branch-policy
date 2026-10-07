@@ -566,7 +566,7 @@ jobs:
               return out
 
 
-          def approval_qualifies(review, head, allow, excluded, reviewer_bots):
+          def approval_qualifies(review, head, allow, excluded, reviewer_bots, *, automatic_allowed=True):
               login = (review.get("user") or {}).get("login")
               uid = (review.get("user") or {}).get("id")
               if not login or review.get("state") != "APPROVED":
@@ -580,6 +580,8 @@ jobs:
               if not is_agent(login=login):
                   return True
               if is_reviewer_app(login, uid, reviewer_bots):
+                  if not automatic_allowed:
+                      return False
                   ok, reason = reviewer_app_body_ok(review.get("body") or "", head)
                   if not ok:
                       print(f"{MODE}: rejecting reviewer App approval from {login}: {reason}")
@@ -1186,6 +1188,56 @@ jobs:
               return (c.get("created_at") or "") != (c.get("updated_at") or "")
 
 
+          def ci_review_opt_in_allowed(cfg, pr):
+              """CI consumer labels select review mode, never grant task or owner authority."""
+              ci = cfg.get("ci_review")
+              if ci is None or (isinstance(ci, dict) and ci.get("enabled") is False):
+                  return True  # Preserve the existing non-CI consumer contract.
+              if not isinstance(ci, dict) or ci.get("enabled") is not True:
+                  return False
+              repository = ci.get("repository")
+              if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+                  return False
+              if repository.lower() != REPO.lower():
+                  return True  # This consumer is not admitted for the repository being gated.
+              label = ci.get("required_opt_in_label")
+              if (not isinstance(label, str) or not 0 < len(label) <= 50
+                      or label.strip() != label
+                      or any(ord(c) < 32 or ord(c) == 127 for c in label)):
+                  return False
+              if not isinstance(pr, dict):
+                  return False
+              labels = pr.get("labels")
+              return isinstance(labels, list) and any(
+                  isinstance(item, dict) and item.get("name") == label for item in labels)
+
+
+          def live_ci_review_opt_in_allowed(number, head, cfg):
+              if ci_review_opt_in_allowed(cfg, None):
+                  return True
+              if not number:
+                  return False
+              pr = call(f"/repos/{REPO}/pulls/{number}")
+              return ((pr.get("head") or {}).get("sha") == head
+                      and pr.get("state") == "open" and not pr.get("draft")
+                      and not pr.get("merged") and ci_review_opt_in_allowed(cfg, pr))
+
+
+          def qualifying_approvals(latest, number, head, allow, excluded, reviewer_bots):
+              """Re-evaluate existing App approval against the current mode at the same head."""
+              qualified = {login: review for login, review in latest.items()
+                           if approval_qualifies(review, head, allow, excluded, reviewer_bots)}
+              # An independent human approval remains sufficient in manual mode.
+              human = sorted(login for login, review in qualified.items()
+                             if not is_reviewer_app(login, (review.get("user") or {}).get("id"), reviewer_bots))
+              if human or not qualified:
+                  return human
+              allowed = live_ci_review_opt_in_allowed(number, head, load_reviewers_config())
+              return sorted(login for login, review in qualified.items()
+                            if approval_qualifies(review, head, allow, excluded, reviewer_bots,
+                                                  automatic_allowed=allowed))
+
+
           def parse_verdict_markers_from_comments(comments, head, excluded_logins, cfg):
               """Newest fabricbloc-verdict v1 marker per reviewer slug (PASS|FAIL) at exact head."""
               if not cfg.get("verdict_approval_enabled"):
@@ -1244,8 +1296,10 @@ jobs:
 
 
           def evaluate_verdict_markers_satisfied(
-              comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
+              comments, head, paths, cfg, excluded_logins, denied_entries, head_ref, *, pr=None,
           ):
+              if not ci_review_opt_in_allowed(cfg, pr):
+                  return False, "automatic CI review requires the configured live opt-in label"
               if not cfg.get("verdict_approval_enabled"):
                   return False, "verdict_approval_enabled is false"
               if not verdict_app_identity(cfg):
@@ -1272,7 +1326,8 @@ jobs:
               ):
                   return False, "newest agent-denied-paths (GitHub Actions app 15368) not success on head"
               return evaluate_verdict_markers_satisfied(
-                  comments, head, paths, cfg, excluded_logins, denied_entries, head_ref
+                  comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
+                  pr=call(f"/repos/{REPO}/pulls/{pr_number}") if cfg.get("ci_review") is not None and pr_number else None,
               )
 
 
@@ -1457,13 +1512,15 @@ jobs:
 
 
           def submit_reviewer_app_approve_if_needed(
-              number, head, app_token, reviewer_slug, *, guard_head=False,
+              number, head, app_token, reviewer_slug, *, guard_head=False, cfg=None,
           ):
               if guard_head:
                   mint_live_head_or_fail(number, head)
               if reviewer_app_already_approved_at_head(number, head):
                   print(f"{MODE}: already approved at head {head[:12]} (fabricbloc-reviewer App)")
                   return False
+              if not live_ci_review_opt_in_allowed(number, head, cfg or {}):
+                  fail("automatic CI review opt-in removed before App APPROVE; human review required")
               submit_reviewer_app_approve(number, head, app_token, reviewer_slug)
               return True
 
@@ -1472,6 +1529,9 @@ jobs:
               number, head, paths, cfg, excluded_logins, denied_entries, head_ref, *,
               wait_denied_paths=False,
           ):
+              if not live_ci_review_opt_in_allowed(number, head, cfg):
+                  print(f"{MODE}: automatic CI review not selected; human review required")
+                  return False
               reviewer, cris, sensitive, _matched = classify_review_routes(REPO, paths, cfg)
               default = cfg.get("default_reviewer") or "madagentpm"
               if cris:
@@ -1500,7 +1560,7 @@ jobs:
                   )
               if deterministic and app_token:
                   if submit_reviewer_app_approve_if_needed(
-                      number, head, app_token, reviewer, guard_head=guard_head
+                      number, head, app_token, reviewer, guard_head=guard_head, cfg=cfg
                   ):
                       print(f"{MODE}: App APPROVE (deterministic: gates green, default route `{reviewer}`)")
                       return True
@@ -1517,7 +1577,8 @@ jobs:
                   comments = paginate(f"/repos/{REPO}/issues/{number}/comments", MAX_ISSUE_COMMENTS)
                   if wait_denied_paths:
                       ok, reason = evaluate_verdict_markers_satisfied(
-                          comments, head, paths, cfg, excluded_logins, denied_entries, head_ref
+                          comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
+                          pr=call(f"/repos/{REPO}/pulls/{number}") if cfg.get("ci_review") is not None else None,
                       )
                   else:
                       ok, reason = verdict_approval_satisfied(
@@ -1527,7 +1588,7 @@ jobs:
               if ok and app_token:
                   required = required_verdict_reviewers(paths, cfg, REPO, head_ref, denied_entries)
                   if submit_reviewer_app_approve_if_needed(
-                      number, head, app_token, reviewer, guard_head=guard_head
+                      number, head, app_token, reviewer, guard_head=guard_head, cfg=cfg
                   ):
                       print(
                           f"{MODE}: App APPROVE from fabricbloc-verdict PASS markers "
@@ -1775,8 +1836,7 @@ jobs:
               blocked = sorted(l for l, r in latest.items() if r["state"] == "CHANGES_REQUESTED")
               if blocked:
                   fail(f"open CHANGES_REQUESTED from {blocked}")
-              ok = sorted(l for l, r in latest.items()
-                          if approval_qualifies(r, head, allow, excluded, reviewer_bots))
+              ok = qualifying_approvals(latest, number, head, allow, excluded, reviewer_bots)
               if not ok and owner_gate_passes(REPO, number, head, head_ref):
                   print(f"{MODE}: owner override satisfies review-of-record at {head[:12]}")
                   return
@@ -1793,8 +1853,7 @@ jobs:
                           login = (r.get("user") or {}).get("login")
                           if login and r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
                               latest[login] = r
-                      ok = sorted(l for l, r in latest.items()
-                                  if approval_qualifies(r, head, allow, excluded, reviewer_bots))
+                      ok = qualifying_approvals(latest, number, head, allow, excluded, reviewer_bots)
                   if not ok:
                       fail(
                           f"no allowlisted, independent APPROVE at head {head[:12]}; "
@@ -2376,7 +2435,7 @@ jobs:
               return out
 
 
-          def approval_qualifies(review, head, allow, excluded, reviewer_bots):
+          def approval_qualifies(review, head, allow, excluded, reviewer_bots, *, automatic_allowed=True):
               login = (review.get("user") or {}).get("login")
               uid = (review.get("user") or {}).get("id")
               if not login or review.get("state") != "APPROVED":
@@ -2390,6 +2449,8 @@ jobs:
               if not is_agent(login=login):
                   return True
               if is_reviewer_app(login, uid, reviewer_bots):
+                  if not automatic_allowed:
+                      return False
                   ok, reason = reviewer_app_body_ok(review.get("body") or "", head)
                   if not ok:
                       print(f"{MODE}: rejecting reviewer App approval from {login}: {reason}")
@@ -2996,6 +3057,56 @@ jobs:
               return (c.get("created_at") or "") != (c.get("updated_at") or "")
 
 
+          def ci_review_opt_in_allowed(cfg, pr):
+              """CI consumer labels select review mode, never grant task or owner authority."""
+              ci = cfg.get("ci_review")
+              if ci is None or (isinstance(ci, dict) and ci.get("enabled") is False):
+                  return True  # Preserve the existing non-CI consumer contract.
+              if not isinstance(ci, dict) or ci.get("enabled") is not True:
+                  return False
+              repository = ci.get("repository")
+              if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+                  return False
+              if repository.lower() != REPO.lower():
+                  return True  # This consumer is not admitted for the repository being gated.
+              label = ci.get("required_opt_in_label")
+              if (not isinstance(label, str) or not 0 < len(label) <= 50
+                      or label.strip() != label
+                      or any(ord(c) < 32 or ord(c) == 127 for c in label)):
+                  return False
+              if not isinstance(pr, dict):
+                  return False
+              labels = pr.get("labels")
+              return isinstance(labels, list) and any(
+                  isinstance(item, dict) and item.get("name") == label for item in labels)
+
+
+          def live_ci_review_opt_in_allowed(number, head, cfg):
+              if ci_review_opt_in_allowed(cfg, None):
+                  return True
+              if not number:
+                  return False
+              pr = call(f"/repos/{REPO}/pulls/{number}")
+              return ((pr.get("head") or {}).get("sha") == head
+                      and pr.get("state") == "open" and not pr.get("draft")
+                      and not pr.get("merged") and ci_review_opt_in_allowed(cfg, pr))
+
+
+          def qualifying_approvals(latest, number, head, allow, excluded, reviewer_bots):
+              """Re-evaluate existing App approval against the current mode at the same head."""
+              qualified = {login: review for login, review in latest.items()
+                           if approval_qualifies(review, head, allow, excluded, reviewer_bots)}
+              # An independent human approval remains sufficient in manual mode.
+              human = sorted(login for login, review in qualified.items()
+                             if not is_reviewer_app(login, (review.get("user") or {}).get("id"), reviewer_bots))
+              if human or not qualified:
+                  return human
+              allowed = live_ci_review_opt_in_allowed(number, head, load_reviewers_config())
+              return sorted(login for login, review in qualified.items()
+                            if approval_qualifies(review, head, allow, excluded, reviewer_bots,
+                                                  automatic_allowed=allowed))
+
+
           def parse_verdict_markers_from_comments(comments, head, excluded_logins, cfg):
               """Newest fabricbloc-verdict v1 marker per reviewer slug (PASS|FAIL) at exact head."""
               if not cfg.get("verdict_approval_enabled"):
@@ -3054,8 +3165,10 @@ jobs:
 
 
           def evaluate_verdict_markers_satisfied(
-              comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
+              comments, head, paths, cfg, excluded_logins, denied_entries, head_ref, *, pr=None,
           ):
+              if not ci_review_opt_in_allowed(cfg, pr):
+                  return False, "automatic CI review requires the configured live opt-in label"
               if not cfg.get("verdict_approval_enabled"):
                   return False, "verdict_approval_enabled is false"
               if not verdict_app_identity(cfg):
@@ -3082,7 +3195,8 @@ jobs:
               ):
                   return False, "newest agent-denied-paths (GitHub Actions app 15368) not success on head"
               return evaluate_verdict_markers_satisfied(
-                  comments, head, paths, cfg, excluded_logins, denied_entries, head_ref
+                  comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
+                  pr=call(f"/repos/{REPO}/pulls/{pr_number}") if cfg.get("ci_review") is not None and pr_number else None,
               )
 
 
@@ -3267,13 +3381,15 @@ jobs:
 
 
           def submit_reviewer_app_approve_if_needed(
-              number, head, app_token, reviewer_slug, *, guard_head=False,
+              number, head, app_token, reviewer_slug, *, guard_head=False, cfg=None,
           ):
               if guard_head:
                   mint_live_head_or_fail(number, head)
               if reviewer_app_already_approved_at_head(number, head):
                   print(f"{MODE}: already approved at head {head[:12]} (fabricbloc-reviewer App)")
                   return False
+              if not live_ci_review_opt_in_allowed(number, head, cfg or {}):
+                  fail("automatic CI review opt-in removed before App APPROVE; human review required")
               submit_reviewer_app_approve(number, head, app_token, reviewer_slug)
               return True
 
@@ -3282,6 +3398,9 @@ jobs:
               number, head, paths, cfg, excluded_logins, denied_entries, head_ref, *,
               wait_denied_paths=False,
           ):
+              if not live_ci_review_opt_in_allowed(number, head, cfg):
+                  print(f"{MODE}: automatic CI review not selected; human review required")
+                  return False
               reviewer, cris, sensitive, _matched = classify_review_routes(REPO, paths, cfg)
               default = cfg.get("default_reviewer") or "madagentpm"
               if cris:
@@ -3310,7 +3429,7 @@ jobs:
                   )
               if deterministic and app_token:
                   if submit_reviewer_app_approve_if_needed(
-                      number, head, app_token, reviewer, guard_head=guard_head
+                      number, head, app_token, reviewer, guard_head=guard_head, cfg=cfg
                   ):
                       print(f"{MODE}: App APPROVE (deterministic: gates green, default route `{reviewer}`)")
                       return True
@@ -3327,7 +3446,8 @@ jobs:
                   comments = paginate(f"/repos/{REPO}/issues/{number}/comments", MAX_ISSUE_COMMENTS)
                   if wait_denied_paths:
                       ok, reason = evaluate_verdict_markers_satisfied(
-                          comments, head, paths, cfg, excluded_logins, denied_entries, head_ref
+                          comments, head, paths, cfg, excluded_logins, denied_entries, head_ref,
+                          pr=call(f"/repos/{REPO}/pulls/{number}") if cfg.get("ci_review") is not None else None,
                       )
                   else:
                       ok, reason = verdict_approval_satisfied(
@@ -3337,7 +3457,7 @@ jobs:
               if ok and app_token:
                   required = required_verdict_reviewers(paths, cfg, REPO, head_ref, denied_entries)
                   if submit_reviewer_app_approve_if_needed(
-                      number, head, app_token, reviewer, guard_head=guard_head
+                      number, head, app_token, reviewer, guard_head=guard_head, cfg=cfg
                   ):
                       print(
                           f"{MODE}: App APPROVE from fabricbloc-verdict PASS markers "
@@ -3585,8 +3705,7 @@ jobs:
               blocked = sorted(l for l, r in latest.items() if r["state"] == "CHANGES_REQUESTED")
               if blocked:
                   fail(f"open CHANGES_REQUESTED from {blocked}")
-              ok = sorted(l for l, r in latest.items()
-                          if approval_qualifies(r, head, allow, excluded, reviewer_bots))
+              ok = qualifying_approvals(latest, number, head, allow, excluded, reviewer_bots)
               if not ok and owner_gate_passes(REPO, number, head, head_ref):
                   print(f"{MODE}: owner override satisfies review-of-record at {head[:12]}")
                   return
@@ -3603,8 +3722,7 @@ jobs:
                           login = (r.get("user") or {}).get("login")
                           if login and r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
                               latest[login] = r
-                      ok = sorted(l for l, r in latest.items()
-                                  if approval_qualifies(r, head, allow, excluded, reviewer_bots))
+                      ok = qualifying_approvals(latest, number, head, allow, excluded, reviewer_bots)
                   if not ok:
                       fail(
                           f"no allowlisted, independent APPROVE at head {head[:12]}; "

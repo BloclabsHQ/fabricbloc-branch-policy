@@ -46,3 +46,33 @@ Only **fabricbloc-verdict[bot]** (pinned in **`verdict_app`**) may post markers.
 Required slugs: **`madagentpm`** always; route reviewer from `reviewers.json`; plus **`aether`** (+ **`sentinel`** when sensitive) for non-GOV ADRs; **`sentinel`** for verdict-eligible engine tests/docs.
 
 Human GOV-0022 PRs still skip agent gates (F6-D2/D3).
+
+## CI consumer opt-in (AG-03)
+
+An enabled `ci_review` consumer in the pinned `rulesets/reviewers.json` must name
+its `repository` and a `required_opt_in_label` (1 to 50 characters, no surrounding
+whitespace or control characters). No label or consumer is selected by this change.
+An absent or explicitly disabled CI consumer preserves the existing non-CI route;
+an enabled consumer only changes the named repository.
+
+For that repository, missing configuration or an absent label selects human review.
+The gate checks the live PR before automation, when evaluating verdict evidence,
+immediately before App approval, and when deciding whether an existing App approval
+still counts. This covers removal at the same head when the gate is evaluated again.
+Independent human approval and the existing AG-06 owner path remain available.
+The label grants neither task authority nor protected-change or merge permission.
+
+Installation requires merging and pinning the gate revision through the existing
+owner procedure, then admitting the CI consumer with the same label as its worker.
+The merge controller must call the published `ci_review_opt_in_allowed(config, pr)`
+against a freshly read PR before relying on App approval. It must retain the other
+current-head, identity and authority checks. Do not enable the consumer until that
+merge-time integration and a same-head label-removal drill pass.
+
+A green check is historical evidence. GitHub organization-required workflows ignore
+activity-type filters and do not rerun simply because a label changes; adding
+`labeled` or `unlabeled` to YAML does not close this gap. See
+[GitHub's required-workflow event rules](https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets).
+This source change does not re-pin rulesets, install the merge controller integration,
+dismiss existing reviews, activate a consumer or guarantee revocation between the
+last API read and GitHub's merge operation.
