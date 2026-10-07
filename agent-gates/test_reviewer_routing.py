@@ -706,5 +706,108 @@ class TestAgentDeniedPathsCheck(unittest.TestCase):
         self.assertIn("MODE is unset", p.stdout + p.stderr)
 
 
+
+class TestCIReviewOptIn(unittest.TestCase):
+    def setUp(self):
+        import embedded_gate as eg
+        from unittest.mock import patch
+        self.eg, self.patch = eg, patch
+        self.enterContext(patch.object(eg, "REPO", "BloclabsHQ/fabricbloc"))
+        self.cfg = {**CFG, 'ci_review': {'enabled': True, 'repository': self.eg.REPO, 'required_opt_in_label': 'review:auto'}}
+        self.pr = {'state': 'open', 'draft': False, 'head': {'sha': HEAD},
+                   'labels': [{'name': 'review:auto'}]}
+        self.calls = self.enterContext(patch.object(eg, 'call', side_effect=lambda *a, **k: self.pr))
+        self.enterContext(patch.object(eg, 'load_reviewers_config', return_value=self.cfg))
+        self.bot, self.uid = next(iter(eg.REVIEWER_APP_BOTS))
+        self.review = {'user': {'login': self.bot, 'id': self.uid}, 'state': 'APPROVED',
+                       'commit_id': HEAD, 'body': f'approve head {HEAD}\napproval-ref: cli:verdict-auto'}
+        self.allow = {self.bot, 'independent-human'}
+
+    def test_config_requires_an_exact_nonempty_label_when_enabled(self):
+        for label in (None, '', ' ', ' x', 'x\n', 'x' * 51, 3):
+            with self.subTest(label=label):
+                cfg = {**self.cfg, 'ci_review': {'enabled': True, 'repository': self.eg.REPO, 'required_opt_in_label': label}}
+                self.assertFalse(self.eg.ci_review_opt_in_allowed(cfg, self.pr))
+        for ci in ([], 'enabled', {'enabled': 'true'}, {}):
+            self.assertFalse(self.eg.ci_review_opt_in_allowed({'ci_review': ci}, self.pr))
+        self.assertTrue(self.eg.ci_review_opt_in_allowed(self.cfg, self.pr))
+        self.pr['labels'] = [{'name': 'Review:Auto'}]
+        self.assertFalse(self.eg.ci_review_opt_in_allowed(self.cfg, self.pr))
+
+    def test_legacy_disabled_consumer_does_not_add_a_label_requirement(self):
+        for cfg in ({}, {'ci_review': {'enabled': False}}):
+            self.assertTrue(self.eg.live_ci_review_opt_in_allowed('7', HEAD, cfg))
+        self.assertTrue(self.eg.ci_review_opt_in_allowed(
+            {'ci_review': {'enabled': True, 'repository': 'other/repository'}}, None))
+        self.calls.assert_not_called()
+
+    def test_missing_label_rejects_existing_app_approval_at_same_head(self):
+        latest = {self.bot: self.review}
+        def result():
+            return self.eg.qualifying_approvals(latest, '7', HEAD, self.allow, set(), self.eg.REVIEWER_APP_BOTS)
+        self.assertEqual(result(), [self.bot])
+        self.pr['labels'] = []
+        self.assertEqual(result(), [])
+        self.pr['labels'] = [{'name': 'review:auto'}]
+        self.assertEqual(result(), [self.bot])
+
+    def test_manual_approval_survives_unlabeled_or_malformed_ci_config(self):
+        human = {**self.review, 'user': {'login': 'independent-human', 'id': 7}}
+        self.pr['labels'] = []
+        self.cfg['ci_review'] = 'invalid'
+        self.assertEqual(self.eg.qualifying_approvals(
+            {self.bot: self.review, 'independent-human': human}, '7', HEAD, self.allow,
+            set(), self.eg.REVIEWER_APP_BOTS), ['independent-human'])
+        self.calls.assert_not_called()
+
+    def test_label_does_not_override_wrong_head_self_review_or_forged_identity(self):
+        for change, excluded in (({'commit_id': OLD}, set()), ({}, {self.bot}),
+                                 ({'user': {'login': self.bot, 'id': 9}}, set())):
+            review = {**self.review, **change}
+            self.assertEqual(self.eg.qualifying_approvals(
+                {self.bot: review}, '7', HEAD, self.allow, excluded, self.eg.REVIEWER_APP_BOTS), [])
+        self.pr['head']['sha'] = OLD
+        self.assertFalse(self.eg.live_ci_review_opt_in_allowed('7', HEAD, self.cfg))
+
+    def test_evidence_requires_current_label_and_preserves_real_fail(self):
+        comments = [comment(verdict_marker('madagentpm', HEAD), VERDICT_BOT, VERDICT_BOT_ID)]
+        args = (comments, HEAD, ['src/a.py'], self.cfg, set(), DENIED, 'agent/warden/fix/task-code')
+        self.assertTrue(self.eg.evaluate_verdict_markers_satisfied(*args, pr=self.pr)[0])
+        self.pr['labels'] = []
+        self.assertFalse(self.eg.evaluate_verdict_markers_satisfied(*args, pr=self.pr)[0])
+        self.pr['labels'] = [{'name': 'review:auto'}]
+        comments.append(comment(verdict_marker('sentinel', HEAD, 'FAIL'), VERDICT_BOT, VERDICT_BOT_ID))
+        self.assertFalse(self.eg.evaluate_verdict_markers_satisfied(*args, pr=self.pr)[0])
+
+    def test_unlabeled_route_never_posts_or_enters_automation(self):
+        self.pr['labels'] = []
+        with self.patch.object(self.eg, 'agent_denied_paths_successful') as denied, self.patch.object(self.eg, 'post_issue_comment') as post:
+            self.assertFalse(self.eg.try_reviewer_automation(
+                '7', HEAD, ['docs/a.md'], self.cfg, set(), DENIED, 'agent/warden/fix/task-code'))
+        denied.assert_not_called()
+        post.assert_not_called()
+
+    def test_label_removed_during_dedupe_refuses_approval_post(self):
+        def remove(*args):
+            self.pr['labels'] = []
+            return False
+        with self.patch.object(self.eg, 'reviewer_app_already_approved_at_head', side_effect=remove), self.patch.object(self.eg, 'submit_reviewer_app_approve') as submit:
+            with self.assertRaises(SystemExit):
+                self.eg.submit_reviewer_app_approve_if_needed('7', HEAD, 'fixture', 'madagentpm', cfg=self.cfg)
+        submit.assert_not_called()
+
+    def test_both_automatic_routes_pass_current_policy_to_final_write_guard(self):
+        for deterministic in (True, False):
+            with self.subTest(deterministic=deterministic), self.patch.dict(self.eg.os.environ, {'REVIEWER_APP_TOKEN': 'fixture'}), self.patch.object(self.eg, 'deterministic_auto_approve_eligible', return_value=deterministic), self.patch.object(self.eg, 'paginate', return_value=[]), self.patch.object(self.eg, 'verdict_approval_satisfied', return_value=(True, None)), self.patch.object(self.eg, 'submit_reviewer_app_approve_if_needed', return_value=True) as submit:
+                self.assertTrue(self.eg.try_reviewer_automation(
+                    '7', HEAD, ['docs/a.md'], self.cfg, set(), DENIED, 'agent/warden/fix/task-code'))
+                self.assertEqual(submit.call_args.kwargs['cfg'], self.cfg)
+
+    def test_live_label_api_failure_cannot_authorize_approval(self):
+        with self.patch.object(self.eg, 'call', side_effect=SystemExit('API unavailable')):
+            with self.assertRaises(SystemExit):
+                self.eg.qualifying_approvals({self.bot: self.review}, '7', HEAD, self.allow, set(), self.eg.REVIEWER_APP_BOTS)
+
+
 if __name__ == "__main__":
     unittest.main()
