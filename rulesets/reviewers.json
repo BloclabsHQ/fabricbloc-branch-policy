@@ -98,6 +98,28 @@
       "sensitive": true
     },
     {
+      "id": "merge-authority-prose",
+      "priority": 225,
+      "_note": "Branch-policy + context canon only. Verdict reviewers union all matched routes (Sentinel + Warden when mixed). DECISIONS #18.",
+      "repos": [
+        "fabricbloc-branch-policy",
+        "context"
+      ],
+      "path_globs": [
+        "DECISIONS.md",
+        "README.md",
+        "POLICY_INDEX.md",
+        "docs/GOV-*.md",
+        "docs/risk-on-diff-not-repo.md",
+        "docs/owner-approved*.md",
+        "docs/REVIEWER-IDENTITY.md",
+        "docs/PR-D2*.md",
+        "domains/**/CONTRACT.md"
+      ],
+      "reviewer": "sentinel",
+      "sensitive": true
+    },
+    {
       "id": "iac-infra",
       "priority": 220,
       "path_globs": [

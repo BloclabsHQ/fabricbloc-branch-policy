@@ -12,7 +12,7 @@ The **`pull_request`** rule with **`required_approving_review_count: 1`** is **n
 
 ## Cris approval (record)
 
-- **Decision:** Approved proposal item **5** — agent reviewers approve through the **fabricbloc-reviewer** GitHub App so only high-risk PRs reach Cris.
+- **Decision:** Approved proposal item **5** — agent reviewers approve through the **fabricbloc-reviewer** GitHub App so only **high-risk diffs** (path/content class, not repository tier) reach Cris. See **DECISIONS #18** / `docs/risk-on-diff-not-repo.md`.
 - **When:** **2026-10-04, 7:56 PM PT**
 - **Relay:** MadAgentPM
 

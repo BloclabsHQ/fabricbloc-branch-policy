@@ -11,3 +11,5 @@ GATE: Re-pin org `canon-agent-gates` after every gate change (P3).
 Verify: `python3 agent-gates/test.py`.
 
 Funds/custody human gate → **FC-01** (`domains/06-funds-custody/`).
+
+Merge authority / human merge vs agent lane → **DECISIONS #18**, `docs/risk-on-diff-not-repo.md` (diff-based risk; no Sweeper on this repo; **`reviewers.json`** routes authority prose to Sentinel below workflow/gate routes).

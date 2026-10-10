@@ -54,6 +54,10 @@ Sources read on 2026-10-03 (all times PT): PR #1526 at its newest head `593a281`
 
 **Residual risk:** Deliberate human merge of agent work outside the detection above (for example rewriting history without linked PR metadata) remains a human accountability path, mitigated by PR template and org audit.
 
+## Merge authority and risk (diff, not repo)
+
+**DECISIONS #18** / `docs/risk-on-diff-not-repo.md`: **human merge** when the diff **edits** listed high-risk surfaces (see doc for exhaustive list and **deploy workflow** definition). **Naming or citing** a boundary does not require human merge; **`agent-denied-paths`** still gates by **path** (**AG-06** / **`owner-approved`** from **Cris** only, **`allowed_label_apps`: `[]`** per **#79**). **Task assignment** is founder yes **within assigned scope at head** and **never** replaces RoR, the label, open **FAIL**/**CHANGES_REQUESTED**, **FC-01**, or Cris-only actions. **Sweeper** may auto-merge docs/context PRs **except** **`fabricbloc-branch-policy`** (**no Sweeper, no admin bypass** — **Cris human merge** until **#82** code-owner gate; then **MadAgentPM merge** after **Sentinel** + **MadAgentPM PASS**) and PRs that touch gate/ruleset/pin code. **Sentinel** on security-sensitive authority changes per **#13** and **`rulesets/reviewers.json`**. **`fabricbloc-reviewer`** does **not** count on Cris-only/human-merge diffs; otherwise only at exact head with no open **FAIL**/**CHANGES_REQUESTED** (**DECISIONS #14**).
+
 **Branch prefix policy (fabricbloc, finding c inventory):**
 
 | Prefix / pattern | Creation | Rationale |
