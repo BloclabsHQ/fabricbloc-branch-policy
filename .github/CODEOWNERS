@@ -1,0 +1,18 @@
+# Advisory only today: policy-main-protected has require_code_owner_review false and
+# required_approving_review_count 0 — CODEOWNERS does not block merge until Cris applies
+# the DECISIONS #19 proposal (see rulesets/canon.json _code_owner_review_proposal).
+# Fleet gates skip this repo (SELF_REPO); JSON at pins.agent_gates_sha goes live when the pin moves.
+
+* @Madgeniusblink
+
+/.github/CODEOWNERS @Madgeniusblink
+
+/rulesets/ @Madgeniusblink
+/rulesets/canon.json @Madgeniusblink
+/rulesets/gate-owners.json @Madgeniusblink
+/rulesets/reviewers.json @Madgeniusblink
+
+# Pinned org required workflows (canon-agent-gates); script changes need org apply of 24445414.
+/.github/workflows/agent-denied-paths.yml @Madgeniusblink
+/.github/workflows/agent-review-of-record.yml @Madgeniusblink
+/.github/workflows/gate-issue-link.yml @Madgeniusblink

@@ -25,7 +25,7 @@ Agent PRs that touch **Cris-only** denied paths (workflows, `rulesets/`, engine 
 
 4. **Scope:** Clears **Cris-only** **`agent-denied-paths`** failures and satisfies **`agent-review-of-record`** without a GitHub **APPROVE**. **DECISIONS #16** **carves out** decision **#14**: **`madgeniusblink`** label approval counts for ROR **including madgeniusblink-authored PRs** when applied by **Cris through an accepted (non–App-mediated) label path** above. Does **not** override provider-control / projection hard-fails, open **CHANGES_REQUESTED**, or Sentinel security domains. **PR-D2** org **`required_approving_review_count: 1`** is **held** in canon (**`_held_rules`**, not live) until the App-APPROVE + **`owner-approved`** fix — **AG-06** alone does not satisfy a live org review count if that rule were applied.
 
-5. **Logging (audit):** on every owner-override evaluation that reaches the label timeline, the gate prints **`owner-approved label event audit:`** with actor **login**, **id**, and **`performed_via_github_app`** (or **`none`**) — on pass and fail.
+5. **Logging (audit):** when owner override evaluates the label timeline, the gate prints **`owner-approved label event audit:`** for the **newest** **`labeled`/`unlabeled`** event (sorted by **`created_at`**, not API page order): actor **login**, **id**, and App **id/slug** or **`none`** — on pass and fail.
 
 6. **Missing config:** if **`gate-owners.json`** is absent at the pin, owner override is **not satisfied** (gates keep failing; not a workflow hard-fail).
 
@@ -44,7 +44,7 @@ It does **not** block an agent driving a **browser** already signed in as **madg
 ### ESC / edge cases
 
 - **Fork PRs** or repos where **repository activity** for `refs/heads/{head_ref}` does not expose a push with **`after == head`**: owner override cannot clear gates until activity is observable (re-label after push appears in activity, or merge from a human branch). Cross-branch check-suite timestamps do **not** substitute.
-- **Shared `madgeniusblink` PAT or browser session:** a label with no **`performed_via_github_app`** passes the App allowlist check; fleet must not expose PAT or owner browser sessions to agents for **`owner-approved`**.
+- **Shared `madgeniusblink` PAT, `gh` OAuth, or browser session:** app-less labels pass the allowlist check; fleet must hold **no** owner PAT/OAuth on cloud-agent hosts and must not drive Cris browser sessions for **`owner-approved`**.
 
 ## Operator steps (fabricbloc example)
 
@@ -56,13 +56,14 @@ It does **not** block an agent driving a **browser** already signed in as **madg
 
 ## Re-pin after merge (GATE: Cris)
 
-When this policy lands on **`fabricbloc-branch-policy`** `main`:
+**Live warning (until pin bump):** Org **`canon-agent-gates`** (**24445414**) loads **`gate-owners.json`** from policy pin **`093f61db`**, which still has **`allowed_label_apps: [1210556]`** — Cursor App labels satisfy AG-06 on fleet repos until **`pins.agent_gates_sha`** on policy **`main`** moves to **#79** **`ee4e57d`** (or later commit with **`[]`**).
 
-1. Human PR on this repo: set **`pins.agent_gates_sha`** to the squash merge SHA; update both **`canon-agent-gates`** `workflows[].sha` entries in **`rulesets/canon.json`** to the same SHA (workflows **`.github/workflows/agent-denied-paths.yml`** and **`agent-review-of-record.yml`** @ that commit).  
-2. **Org apply:** MadGeniusBot / Cris updates live org ruleset **24445414** from **`canon.json`** — **requires Cris yes** (same as every agent-gates re-pin).  
-3. Until re-pinned, fabricbloc still runs the previous gate SHA.
+**JSON config (`gate-owners.json`, `reviewers.json`):** set **`pins.agent_gates_sha`** on policy **`main`** to the commit containing **`allowed_label_apps: []`** (e.g. **#79** **`ee4e57d`**) — **`[]`** is live for fleet gates **immediately** — **no org apply**. Merging JSON without moving the pin changes nothing live.
 
-Live org ruleset **24445414** currently loads **`gate-owners.json`** from pin **`093f61db`** (includes Cursor allowlist). **Re-pin after this merge** so production gates read **`allowed_label_apps: []`**.
+**Embedded gate script** (audit log format, timeline sort, etc.): update **`canon-agent-gates`** `workflows[].sha` in **`rulesets/canon.json`** to the merge SHA and **org apply** ruleset **24445414** — **Cris GATE** — so required workflows run the new embedded Python.
+
+1. Human PR: bump **`pins.agent_gates_sha`** when JSON or script changes land; keep workflow SHAs in **`canon.json`** aligned with that commit for org apply.  
+2. **Org apply** only when workflow SHAs change (not for JSON-only pin bumps already on **`main`**).
 
 ## Proposal: relax Q14 push lock (not applied in this PR)
 

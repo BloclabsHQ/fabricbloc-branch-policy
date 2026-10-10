@@ -6,7 +6,7 @@ Without an argument it downloads the description from
 https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json
 Needs: pip install jsonschema. TODO-PIN placeholders are replaced by a dummy SHA.
 """
-import json, sys, urllib.request
+import json, re, subprocess, sys, urllib.request
 from pathlib import Path
 import jsonschema
 
@@ -27,6 +27,24 @@ def strip(o):
     if isinstance(o, list):
         return [strip(x) for x in o]
     return o
+
+
+def agent_gates_pin_ancestor_errors(canon, repo_root=None):
+    """Require a published pin, including in detached Actions checkouts."""
+    pin = ((canon.get("pins") or {}).get("agent_gates_sha") or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", pin):
+        return [f"pins.agent_gates_sha must be a 40-char lowercase hex commit (got {pin[:20]!r}...)"]
+    root = Path(repo_root) if repo_root else CANON_PATH.parent.parent
+    r = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", pin, "refs/remotes/origin/main"],
+        cwd=root,
+        capture_output=True,
+    )
+    if r.returncode == 1:
+        return [f"pins.agent_gates_sha {pin} is not an ancestor of origin/main"]
+    if r.returncode != 0:
+        return ["cannot verify pins.agent_gates_sha ancestry; fetch origin/main with complete history"]
+    return []
 
 
 def agent_gates_live_ref_errors(canon):
@@ -53,7 +71,10 @@ def main():
     ref_errs = agent_gates_live_ref_errors(canon)
     for msg in ref_errs:
         print(f"BAD live ref include {msg}")
-    bad = len(ref_errs)
+    pin_errs = agent_gates_pin_ancestor_errors(canon)
+    for msg in pin_errs:
+        print(f"BAD agent_gates pin {msg}")
+    bad = len(ref_errs) + len(pin_errs)
     for path, items in (("/orgs/{org}/rulesets", canon["organization_rulesets"]),
                         ("/repos/{owner}/{repo}/rulesets", canon["repository_rulesets"])):
         sch = dict(api["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"])
