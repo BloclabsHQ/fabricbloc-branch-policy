@@ -6,7 +6,7 @@ Policy-as-code for FabricBloc org gates and fleet rules. **Cite rule IDs from [P
 
 | Domain | Path | IDs |
 |---|---|---|
-| Branches | `domains/01-branches/` | BR-* |
+| Branches | `domains/01-branch-rules/` | BR-* |
 | Merge rulesets | `domains/02-merge-rulesets/` | MR-* |
 | Agent gates | `domains/03-agent-gates/` | AG-* |
 | Cursor cloud | `domains/04-cursor/` | CU-* |
